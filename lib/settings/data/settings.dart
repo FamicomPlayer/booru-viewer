@@ -57,6 +57,19 @@ class Settings extends NotifiedSettings {
     key: 'downloadPath',
     initialValue: null,
   );
+
+  late final ValueNotifier<String> tagFolderRulesRaw = createSetting<String>(
+    key: 'tagFolderRules',
+    initialValue: TagFolderRule.encodeList(TagFolderRule.defaultRules),
+  );
+
+  List<TagFolderRule> get tagFolderRules =>
+      TagFolderRule.decodeList(tagFolderRulesRaw.value);
+
+  set tagFolderRules(List<TagFolderRule> rules) {
+    tagFolderRulesRaw.value = TagFolderRule.encodeList(rules);
+  }
+
   late final ValueNotifier<bool> muteVideos = createSetting<bool>(
     key: 'muteVideos',
     initialValue: true,

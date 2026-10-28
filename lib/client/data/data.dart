@@ -3,6 +3,7 @@ export 'bridge.dart';
 export 'client.dart';
 export 'credentials.dart';
 export 'dio.dart';
+export 'engine.dart';
 export 'factory.dart';
 export 'newline.dart';
 export 'status.dart';

@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:e1547/client/client.dart';
 import 'package:e1547/pool/pool.dart';
 import 'package:e1547/post/post.dart';
 import 'package:e1547/query/query.dart';
@@ -33,10 +34,16 @@ extension PostQuerying on PostClient {
       final poolId = int.tryParse(tags['pool'] ?? '');
       if (poolId != null) return useByPool(id: poolId);
     }
-    if (tags.length == 2 &&
-        order == 'fav' &&
-        username != null &&
-        tags['fav'] == username) {
+
+    final isFav = (tags.length == 2 &&
+            order == 'fav' &&
+            username != null &&
+            tags['fav'] == username) ||
+        (engine == BooruEngine.derpibooru &&
+            (normalized?['tags'] == 'my:faves' || tags['my'] == 'faves')) ||
+        (engine == BooruEngine.rule34 && tags['fav'] != null);
+
+    if (isFav) {
       return useFavorites();
     }
 
@@ -44,6 +51,10 @@ extension PostQuerying on PostClient {
   }
 
   QueryMap? _normalize(QueryMap? query) {
+    if (engine == BooruEngine.derpibooru && query?['tags'] == 'my:faves') {
+      return query;
+    }
+
     final tags = TagMap(query?['tags']);
     if (tags.length != 1) return query;
     if (tags['order'] != null) return query;

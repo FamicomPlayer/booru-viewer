@@ -5,4 +5,5 @@ export 'grid.dart';
 export 'handedness.dart';
 export 'icon.dart';
 export 'settings.dart';
+export 'tag_folder_rules.dart';
 export 'text.dart';

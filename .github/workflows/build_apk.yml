@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: 'Flutter version or channel (e.g. 3.44.9, stable)'
+        required: false
+        default: '3.44.9'
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Determine Flutter Version
+        run: |
+          if [ -n "${{ github.event.inputs.flutter_version }}" ]; then
+            echo "FLUTTER_VERSION=${{ github.event.inputs.flutter_version }}" >> $GITHUB_ENV
+          else
+            chmod +x ./.github/workflows/get_flutter_version.sh 2>/dev/null || true
+            VERSION=$(./.github/workflows/get_flutter_version.sh 2>/dev/null || echo "3.44.9")
+            echo "FLUTTER_VERSION=$VERSION" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build APK (Release)
+        run: flutter build apk --release
+
+      - name: List Generated APKs
+        run: |
+          ls -la build/app/outputs/flutter-apk/
+
+      - name: Upload APKs as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: booru-viewer-apks
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+          retention-days: 30
+
+      - name: Create Release on Tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

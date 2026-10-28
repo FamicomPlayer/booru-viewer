@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:e1547/account/account.dart';
 import 'package:e1547/app/app.dart';
@@ -46,10 +48,10 @@ class Client with Disposable {
     identity: identity,
   );
 
-  late final TagClient tags = TagClient(dio: dio);
+  late final TagClient tags = TagClient(dio: dio, identity: identity);
   late final WikiClient wikis = WikiClient(dio: dio);
 
-  late final CommentClient comments = CommentClient(dio: dio);
+  late final CommentClient comments = CommentClient(dio: dio, identity: identity);
 
   late final PoolClient pools = PoolClient(dio: dio);
   // TODO: add Sets
@@ -115,6 +117,15 @@ class Client with Disposable {
 
 extension ClientExtension on Client {
   String get host => identity.host;
-  bool get hasLogin => identity.username != null;
+  BooruEngine get engine => BooruEngine.fromHost(identity.host);
+  bool get hasLogin {
+    if (identity.username != null && identity.username!.isNotEmpty) return true;
+    final headers = identity.headers;
+    if (headers == null) return false;
+    return headers.containsKey('key') ||
+        headers.containsKey('X-API-Key') ||
+        headers.containsKey('api_key') ||
+        headers.containsKey(HttpHeaders.authorizationHeader);
+  }
   String withHost(String path) => identity.withHost(path);
 }

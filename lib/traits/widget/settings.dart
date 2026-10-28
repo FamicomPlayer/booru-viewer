@@ -1,4 +1,6 @@
+import 'package:e1547/app/app.dart';
 import 'package:e1547/client/client.dart';
+import 'package:e1547/identity/identity.dart';
 import 'package:e1547/shared/shared.dart';
 import 'package:e1547/tag/tag.dart';
 import 'package:e1547/traits/traits.dart';
@@ -6,6 +8,89 @@ import 'package:flutter/material.dart';
 
 class DenyListPage extends StatelessWidget {
   const DenyListPage({super.key});
+
+  Future<void> _showCopyFromAccountDialog(
+    BuildContext context,
+    Client client,
+    Traits traits,
+  ) async {
+    final identityClient = context.read<IdentityClient>();
+    final allIdentities = await identityClient.all().stream.first;
+    final otherIdentities =
+        allIdentities.where((id) => id.id != client.identity.id).toList();
+
+    if (otherIdentities.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other accounts found to copy from.')),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Copy blacklist from...'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: otherIdentities.length,
+            itemBuilder: (context, index) {
+              final id = otherIdentities[index];
+              return ListTile(
+                leading: const Icon(Icons.person),
+                title: Text(id.usernameOrAnon),
+                subtitle: Text(id.host),
+                onTap: () async {
+                  Navigator.of(dialogContext).pop();
+                  final storage = context.read<AppStorage>();
+                  final source =
+                      await storage.sqlite.traitsRepository.getOrNull(id.id);
+                  if (source != null && source.denylist.isNotEmpty) {
+                    final merged = {
+                      ...traits.denylist,
+                      ...source.denylist,
+                    }.toList();
+                    await client.accounts.push(
+                      traits: traits.copyWith(denylist: merged),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Copied ${source.denylist.length} tags from ${id.usernameOrAnon}!',
+                          ),
+                        ),
+                      );
+                    }
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Selected account has an empty blacklist.',
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('CANCEL'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +126,12 @@ class DenyListPage extends StatelessWidget {
                 appBar: DefaultAppBar(
                   title: const Text('Blacklist'),
                   actions: [
+                    IconButton(
+                      icon: const Icon(Icons.copy),
+                      tooltip: 'Copy blacklist from another account',
+                      onPressed: () =>
+                          _showCopyFromAccountDialog(context, client, traits),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.edit),
                       onPressed: () => Navigator.of(context).push(

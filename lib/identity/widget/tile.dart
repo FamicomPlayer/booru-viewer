@@ -1,3 +1,4 @@
+import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/shared/shared.dart';
 import 'package:e1547/user/user.dart';
@@ -34,13 +35,16 @@ class CurrentIdentityTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final identity = context.watch<IdentityClient>().identity;
+    final engine = BooruEngine.fromHost(identity.host);
+    final canViewProfile = identity.username != null && engine == BooruEngine.e621;
+
     return IntrinsicHeight(
       child: Row(
         children: [
           Expanded(
             child: InkWell(
               borderRadius: const BorderRadius.all(Radius.circular(4)),
-              onTap: identity.username != null
+              onTap: canViewProfile
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (context) =>

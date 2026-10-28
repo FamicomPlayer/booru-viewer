@@ -31,7 +31,9 @@ class _AccountFormState extends State<AccountForm> {
     text: widget.identity?.username,
   );
   late final TextEditingController apikeyController = TextEditingController(
-    text: widget.identity?.headers?[HttpHeaders.authorizationHeader] != null
+    text: (widget.identity?.headers?[HttpHeaders.authorizationHeader] != null ||
+            widget.identity?.headers?['key'] != null ||
+            widget.identity?.headers?['api_key'] != null)
         ? OmittedPasswordTextInputFormatter.passwordOmitted
         : null,
   );
@@ -40,6 +42,17 @@ class _AccountFormState extends State<AccountForm> {
   String? error;
 
   bool get isEditing => widget.identity != null;
+  BooruEngine get currentEngine => BooruEngine.fromHost(hostController.text);
+
+  @override
+  void initState() {
+    super.initState();
+    hostController.addListener(_onHostChanged);
+  }
+
+  void _onHostChanged() {
+    setState(() {});
+  }
 
   bool get isFulfilled {
     if (isEditing) return true;
@@ -49,13 +62,37 @@ class _AccountFormState extends State<AccountForm> {
       case false:
         return true;
       case true:
+        if (currentEngine == BooruEngine.derpibooru) {
+          return apikeyController.text.trim().isNotEmpty;
+        }
+        if (currentEngine == BooruEngine.rule34) {
+          return (usernameController.text.trim().isNotEmpty &&
+                  apikeyController.text.trim().isNotEmpty) ||
+              Rule34Credentials.parse(apikeyController.text) != null ||
+              Rule34Credentials.parse(usernameController.text) != null;
+        }
         return usernameController.text.trim().isNotEmpty &&
             apikeyController.text.trim().isNotEmpty;
     }
   }
 
+  void _checkForRule34Credentials(String text) {
+    if (currentEngine != BooruEngine.rule34) return;
+    final creds = Rule34Credentials.parse(text);
+    if (creds != null) {
+      if (usernameController.text != creds.userId) {
+        usernameController.text = creds.userId;
+      }
+      if (apikeyController.text != creds.apiKey) {
+        apikeyController.text = creds.apiKey;
+      }
+      setState(() {});
+    }
+  }
+
   @override
   void dispose() {
+    hostController.removeListener(_onHostChanged);
     hostController.dispose();
     usernameController.dispose();
     apikeyController.dispose();
@@ -65,14 +102,36 @@ class _AccountFormState extends State<AccountForm> {
   void submit() {
     if (!formKey.currentState!.validate()) return;
     if (withAuth == null) return;
+
+    String? username = withAuth! ? usernameController.text.trim() : null;
+    String? apikey = withAuth! ? apikeyController.text.trim() : null;
+
+    if (withAuth! && currentEngine == BooruEngine.rule34) {
+      final creds = Rule34Credentials.parse(apikey ?? '') ??
+          (username != null ? Rule34Credentials.parse(username) : null);
+      if (creds != null) {
+        username = (username != null &&
+                username.isNotEmpty &&
+                !username.contains('&') &&
+                !username.contains('='))
+            ? username
+            : creds.userId;
+        apikey = creds.apiKey;
+      }
+    } else if (withAuth! && currentEngine == BooruEngine.derpibooru) {
+      if (username == null || username.isEmpty) {
+        username = 'Derpibooru User';
+      }
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => LoginLoadingDialog(
         identity: widget.identity,
         host: hostController.text,
-        username: withAuth! ? usernameController.text : null,
-        apikey: withAuth! ? apikeyController.text : null,
+        username: username,
+        apikey: apikey,
         activate: !isEditing,
         onError: (value) => setState(() {
           value ??= 'Check your network connection and login details';
@@ -90,31 +149,61 @@ class _AccountFormState extends State<AccountForm> {
         ClientFactory factory = context.watch<ClientFactory>();
         String? apiKeysUrl = factory.apiKeysUrl(hostController.text);
         String? registrationUrl = factory.registrationUrl(hostController.text);
-        if (apiKeysUrl != null) {
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => launch(apiKeysUrl),
-              child: const Text('Where do I find my API key?'),
-            ),
-          );
-        }
-        if (registrationUrl != null) {
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => launch(registrationUrl),
-              child: const Text('Don\'t have an account? Sign up here'),
-            ),
-          );
-        }
-        return const SizedBox.shrink();
+        final engine = currentEngine;
+        String linkText = switch (engine) {
+          BooruEngine.rule34 => 'Where do I find my API Access Credentials?',
+          BooruEngine.derpibooru => 'Where do I find my Derpibooru API key?',
+          BooruEngine.e621 => 'Where do I find my API key?',
+        };
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (apiKeysUrl != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => launch(apiKeysUrl),
+                  child: Text(linkText),
+                ),
+              ),
+            if (registrationUrl != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => launch(registrationUrl),
+                  child: const Text('Don\'t have an account? Sign up here'),
+                ),
+              ),
+          ],
+        );
       },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final engine = currentEngine;
+    final usernameLabel = switch (engine) {
+      BooruEngine.rule34 => 'User ID (e.g. 315839)',
+      BooruEngine.derpibooru => 'Username (optional display name)',
+      BooruEngine.e621 => 'Username',
+    };
+    final apikeyLabel = switch (engine) {
+      BooruEngine.rule34 => 'API Access Credentials / Key',
+      BooruEngine.derpibooru => 'API Key',
+      BooruEngine.e621 => 'API key',
+    };
+    final apikeyHint = switch (engine) {
+      BooruEngine.rule34 => '&api_key=...&user_id=...',
+      _ => null,
+    };
+    final apikeyHelper = switch (engine) {
+      BooruEngine.rule34 => 'Paste your full API Access Credentials or API key',
+      BooruEngine.derpibooru => 'Found in Account Settings -> Edit -> API Key',
+      _ => null,
+    };
+
     return Form(
       key: formKey,
       child: Column(
@@ -145,10 +234,20 @@ class _AccountFormState extends State<AccountForm> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const SizedBox(height: 12),
-                      UsernameFormField(controller: usernameController),
+                      UsernameFormField(
+                        controller: usernameController,
+                        labelText: usernameLabel,
+                        optional: engine == BooruEngine.derpibooru,
+                        onChanged: _checkForRule34Credentials,
+                      ),
                       ApikeyFormField(
                         controller: apikeyController,
                         canOmit: isEditing,
+                        host: hostController.text,
+                        labelText: apikeyLabel,
+                        hintText: apikeyHint,
+                        helperText: apikeyHelper,
+                        onChanged: _checkForRule34Credentials,
                       ),
                       apiKeyLink(),
                     ],

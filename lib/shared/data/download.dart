@@ -35,15 +35,11 @@ abstract final class FileDownloader {
   /// Releases permissions to a previously selected directory.
   static Future<void> forgetDirectory(String? directory) async {
     if (Platform.isAndroid && directory != null) {
-      // TODO: not implemented, see https://github.com/flutter-cavalry/saf_util/issues/6
-      // await SafUtil().releasePersistableUriPermission(directory);
+      // Not implemented
     }
   }
 
   /// Downloads a file to the specified directory.
-  /// The user may choose a directory, if the parameter `directory` is null or the app does not have permission to write to the specified directory.
-  ///
-  /// Not supported on iOS.
   static Future<void> downloadFile({
     required File file,
     required String? directory,
@@ -75,10 +71,15 @@ abstract final class FileDownloader {
           target = directory;
         }
 
-        String lastSegment = Uri.parse(target).pathSegments.last;
-        if (folderName != null && lastSegment == 'Pictures') {
+        final segments = folderName
+                ?.split(RegExp(r'[\\/]'))
+                .where((s) => s.trim().isNotEmpty)
+                .toList() ??
+            const [];
+        final String lastSegment = Uri.parse(target).pathSegments.last;
+        if (segments.isNotEmpty && lastSegment == 'Pictures') {
           try {
-            final targetDir = await SafUtil().mkdirp(target, [folderName]);
+            final targetDir = await SafUtil().mkdirp(target, segments);
             target = targetDir.uri;
           } on Exception {
             // can't create app specific sub-folder.
@@ -97,7 +98,6 @@ abstract final class FileDownloader {
           mimeType,
           overwrite: true,
         );
-        // This should probably only happen in [downloadImage].
         await MediaScanner.loadMedia(path: target);
       } else {
         String directoryPath =
@@ -106,8 +106,13 @@ abstract final class FileDownloader {
 
         onDirectoryChanged?.call(directoryPath);
 
-        if (folderName != null && basename(directoryPath) == 'Pictures') {
-          directoryPath = join(directoryPath, folderName);
+        final segments = folderName
+                ?.split(RegExp(r'[\\/]'))
+                .where((s) => s.trim().isNotEmpty)
+                .toList() ??
+            const [];
+        if (segments.isNotEmpty && basename(directoryPath) == 'Pictures') {
+          directoryPath = joinAll([directoryPath, ...segments]);
         }
 
         final targetDir = Directory(directoryPath);

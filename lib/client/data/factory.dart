@@ -18,6 +18,8 @@ class ClientConfig {
 
 const String _e621Host = 'https://e621.net';
 const String _e926Host = 'https://e926.net';
+const String _derpibooruHost = 'https://derpibooru.org';
+const String _rule34Host = 'https://api.rule34.xxx';
 
 class ClientFactory {
   Client create(ClientConfig config) => Client(
@@ -31,27 +33,41 @@ class ClientFactory {
   }
 
   TraitsRequest createDefaultTraits(Identity identity) {
-    return switch (normalizeHostUrl(identity.host)) {
-      _e621Host || _e926Host => TraitsRequest(
+    final engine = BooruEngine.fromHost(identity.host);
+    return switch (engine) {
+      BooruEngine.e621 => TraitsRequest(
         identity: identity.id,
         denylist: ['young -rating:s', 'gore', 'scat', 'watersports'],
         homeTags: 'score:>=20',
       ),
-      _ => TraitsRequest(identity: identity.id),
+      BooruEngine.derpibooru => TraitsRequest(
+        identity: identity.id,
+        denylist: ['grimdark', 'grotesque'],
+        homeTags: 'score.gte:20',
+      ),
+      BooruEngine.rule34 => TraitsRequest(
+        identity: identity.id,
+        denylist: ['gore', 'scat'],
+        homeTags: 'score:>=20',
+      ),
     };
   }
 
   String? registrationUrl(String host) {
-    return switch (normalizeHostUrl(host)) {
-      _e621Host || _e926Host => '$host/users/new',
-      _ => null,
+    final engine = BooruEngine.fromHost(host);
+    return switch (engine) {
+      BooruEngine.e621 => '$host/users/new',
+      BooruEngine.derpibooru => 'https://derpibooru.org/users/sign_up',
+      BooruEngine.rule34 => 'https://rule34.xxx/index.php?page=account&s=reg',
     };
   }
 
   String? apiKeysUrl(String host) {
-    return switch (normalizeHostUrl(host)) {
-      _e621Host || _e926Host => '$host/api_keys',
-      _ => null,
+    final engine = BooruEngine.fromHost(host);
+    return switch (engine) {
+      BooruEngine.e621 => '$host/api_keys',
+      BooruEngine.derpibooru => 'https://derpibooru.org/users/edit',
+      BooruEngine.rule34 => 'https://rule34.xxx/index.php?page=account&s=options',
     };
   }
 

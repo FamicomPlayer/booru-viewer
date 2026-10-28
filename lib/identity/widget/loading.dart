@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:drift/isolate.dart';
 import 'package:drift/native.dart';
+import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/shared/shared.dart';
 import 'package:flutter/material.dart';
@@ -45,22 +46,73 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
     String? username = widget.username;
     String? apikey = widget.apikey;
     Map<String, String>? headers = Map.of(identity?.headers ?? {});
-    if (username != null && apikey != null) {
+    final engine = BooruEngine.fromHost(host);
+
+    if (apikey != null && apikey.isNotEmpty) {
       if (apikey == OmittedPasswordTextInputFormatter.passwordOmitted) {
-        apikey = parseBasicAuth(headers[HttpHeaders.authorizationHeader])?.$2;
+        apikey = headers['api_key'] ??
+            headers['key'] ??
+            headers['X-API-Key'] ??
+            parseBasicAuth(headers[HttpHeaders.authorizationHeader])?.$2;
         if (apikey == null) {
           throw StateError(
             'Login failed: API key was omitted but could not be recovered',
           );
         }
       }
-      headers[HttpHeaders.authorizationHeader] = encodeBasicAuth(
-        username,
-        apikey,
-      );
+
+      switch (engine) {
+        case BooruEngine.derpibooru:
+          headers['key'] = apikey;
+          headers['X-API-Key'] = apikey;
+          headers.remove(HttpHeaders.authorizationHeader);
+          username = (username != null && username.isNotEmpty)
+              ? username
+              : 'Derpibooru User';
+        case BooruEngine.rule34:
+          final creds = Rule34Credentials.parse(apikey) ??
+              (username != null ? Rule34Credentials.parse(username) : null);
+          if (creds != null) {
+            headers['user_id'] = creds.userId;
+            headers['api_key'] = creds.apiKey;
+            if (username == null ||
+                username.isEmpty ||
+                username.contains('&') ||
+                username.contains('=')) {
+              username = creds.userId;
+            }
+          } else {
+            if (username != null && username.isNotEmpty) {
+              headers['user_id'] = username;
+            }
+            headers['api_key'] = apikey;
+          }
+          headers.remove(HttpHeaders.authorizationHeader);
+        case BooruEngine.e621:
+          if (username != null) {
+            headers[HttpHeaders.authorizationHeader] = encodeBasicAuth(
+              username,
+              apikey,
+            );
+          }
+      }
+    } else if (username != null &&
+        username.isNotEmpty &&
+        engine == BooruEngine.rule34) {
+      final creds = Rule34Credentials.parse(username);
+      if (creds != null) {
+        headers['user_id'] = creds.userId;
+        headers['api_key'] = creds.apiKey;
+        username = creds.userId;
+      }
     } else {
       headers.remove(HttpHeaders.authorizationHeader);
+      headers.remove('key');
+      headers.remove('X-API-Key');
+      headers.remove('user_id');
+      headers.remove('api_key');
     }
+
     try {
       if (identity != null) {
         await client.replace(

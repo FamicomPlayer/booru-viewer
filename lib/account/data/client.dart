@@ -1,6 +1,7 @@
 import 'package:deep_pick/deep_pick.dart';
 import 'package:dio/dio.dart';
 import 'package:e1547/account/account.dart';
+import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/post/post.dart';
 import 'package:e1547/shared/shared.dart';
@@ -20,12 +21,31 @@ class AccountClient {
   final ValueNotifier<Traits> traits;
   final PostClient postsService;
 
-  Future<void> available() => dio.head('/status.json');
+  BooruEngine get engine => BooruEngine.fromHost(identity.host);
+
+  Future<void> available() {
+    switch (engine) {
+      case BooruEngine.derpibooru:
+        return dio.get('/api/v1/json/images/1');
+      case BooruEngine.rule34:
+        return dio.get('/index.php', queryParameters: {
+          'page': 'dapi',
+          's': 'post',
+          'q': 'index',
+          'json': '1',
+          'limit': 1,
+        });
+      case BooruEngine.e621:
+        return dio.head('/status.json');
+    }
+  }
 
   Future<void> push({required Traits traits, CancelToken? cancelToken}) async {
     Traits previous = this.traits.value;
     this.traits.value = traits;
     if (identity.username == null) return;
+    if (engine != BooruEngine.e621) return;
+
     try {
       if (!listEquals(previous.denylist, traits.denylist)) {
         Map<String, dynamic> body = {
@@ -52,6 +72,16 @@ class AccountClient {
   Future<Account?> get({CancelToken? cancelToken}) async {
     if (identity.username == null) return null;
 
+    if (engine != BooruEngine.e621) {
+      return Account(
+        id: identity.id,
+        name: identity.username ?? engine.displayName,
+        avatarId: null,
+        hasCroppedAvatar: false,
+        blacklistedTags: traits.value.denylist.join('\n'),
+      );
+    }
+
     Account result = await dio
         .get('/users/${identity.username}.json', cancelToken: cancelToken)
         .then((response) => E621Account.fromJson(response.data));
@@ -59,7 +89,6 @@ class AccountClient {
     Post? avatar;
 
     if (result.avatarId != null) {
-      // TODO: this shouldnt be here
       avatar = await postsService.get(
         id: result.avatarId!,
         cancelToken: cancelToken,
@@ -81,10 +110,7 @@ class AccountClient {
     }
 
     traits.value = traits.value.copyWith(
-      // TODO: also store "id"
       denylist: result.blacklistedTags?.split('\n').trim() ?? [],
-      // TODO: also store "perPage"
-      // TODO: this shouldn't be file but sample
       avatar: avatarUrl,
     );
 

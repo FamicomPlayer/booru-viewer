@@ -1,3 +1,8 @@
+# Local credentials & secrets
+*-api.txt
+*credentials*
+*.secret
+
 # Miscellaneous
 *.class
 *.lock

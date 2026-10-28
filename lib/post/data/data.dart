@@ -1,5 +1,6 @@
 export 'actions.dart';
 export 'client.dart';
+export 'derpibooru_post.dart';
 export 'download.dart';
 export 'editing.dart';
 export 'filter.dart';
@@ -8,3 +9,4 @@ export 'json.dart';
 export 'params.dart';
 export 'post.dart';
 export 'query.dart';
+export 'rule34_post.dart';

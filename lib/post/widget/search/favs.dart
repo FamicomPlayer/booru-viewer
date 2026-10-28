@@ -13,8 +13,15 @@ class FavPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final client = context.watch<Client>();
+    final favTags = switch (client.engine) {
+      BooruEngine.derpibooru => 'my:faves',
+      BooruEngine.rule34 =>
+        'fav:${client.identity.headers?['user_id'] ?? client.identity.username ?? ''}',
+      BooruEngine.e621 => 'fav:${client.identity.username ?? ''}',
+    };
+
     return RouterDrawerEntry<FavPage>(
-      child: client.identity.username == null
+      child: !client.hasLogin
           ? const AdaptiveScaffold(
               appBar: DefaultAppBar(title: Text('Favorites')),
               body: IconMessage(
@@ -27,7 +34,7 @@ class FavPage extends StatelessWidget {
               keys: (_) => [client],
               child: ChangeNotifierProvider(
                 create: (_) => PostParamsController(
-                  initial: PostParams(tags: 'fav:${client.identity.username}'),
+                  initial: PostParams(tags: favTags),
                 ),
                 child: PostPageHistoryConnector(
                   child: PostPageQueryBuilder(
@@ -42,8 +49,10 @@ class FavPage extends StatelessWidget {
                         endDrawer: ContextDrawer(
                           title: const Text('Posts'),
                           children: [
-                            const FavoriteOrderSwitch(),
-                            const Divider(),
+                            if (client.engine == BooruEngine.e621) ...[
+                              const FavoriteOrderSwitch(),
+                              const Divider(),
+                            ],
                             const DrawerDenySwitch(),
                             DrawerTagCounter(
                               posts: state.data?.pages

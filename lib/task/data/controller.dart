@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:e1547/app/app.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/logs/logs.dart';
+import 'package:e1547/post/post.dart';
 import 'package:e1547/settings/settings.dart';
 import 'package:e1547/shared/shared.dart';
 import 'package:e1547/task/task.dart';
@@ -262,7 +264,6 @@ class TasksController extends ChangeNotifier {
               replace: true,
             );
           } on Object catch (e, s) {
-            // upvote is best-effort once the favorite succeeded
             _logger.warn(
               'Upvote after favorite failed for post {post}',
               {'post': task.postId},
@@ -285,6 +286,30 @@ class TasksController extends ChangeNotifier {
       );
     }
     final ValueNotifier<double>? progress = _progress[task.id];
+
+    String folderName = AppInfo.instance.appName;
+    try {
+      final postQuery = client.posts.useGet(id: task.postId);
+      await postQuery.fetch();
+      final post = postQuery.state.data;
+      if (post != null) {
+        final postTags = post.tags.values
+            .expand((t) => t)
+            .map((t) => t.toLowerCase())
+            .toSet();
+
+        for (final rule in settings.tagFolderRules) {
+          if (rule.folder.isEmpty) continue;
+          final hasMatch =
+              rule.tags.any((rt) => postTags.contains(rt.toLowerCase()));
+          if (hasMatch) {
+            folderName = '${AppInfo.instance.appName}/${rule.folder}';
+            break;
+          }
+        }
+      }
+    } catch (_) {}
+
     await for (final response in cacheManager.getFileStream(
       url,
       withProgress: true,
@@ -297,7 +322,7 @@ class TasksController extends ChangeNotifier {
           await FileDownloader.downloadImage(
             file: response.file,
             directory: settings.downloadPath.value,
-            folderName: AppInfo.instance.appName,
+            folderName: folderName,
             fileName: fileName,
             onDirectoryChanged: (p) => settings.downloadPath.value = p,
           );
@@ -328,12 +353,8 @@ class TasksController extends ChangeNotifier {
     );
   }
 
-  /// Cancels every queued and in-progress task. Canceled tasks stay in the
-  /// list and can be retried.
   Future<void> cancelAll() => repository.cancelAll(identity: identity);
 
-  /// Removes completed and canceled tasks. Failed tasks are kept so they stay
-  /// visible for retry.
   Future<void> clearDone() => repository.clear(
     statuses: const {TaskStatus.completed, TaskStatus.canceled},
     identity: identity,

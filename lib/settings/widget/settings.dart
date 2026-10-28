@@ -228,7 +228,7 @@ class SettingsPage extends StatelessWidget {
                 indent: SectionHeader.listTileIndent,
                 title: 'Interactions',
               ),
-              if (!Platform.isIOS)
+              if (!Platform.isIOS) ...[
                 ValueListenableBuilder<String?>(
                   valueListenable: settings.downloadPath,
                   builder: (context, value, child) => ListTile(
@@ -248,6 +248,17 @@ class SettingsPage extends StatelessWidget {
                     },
                   ),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.create_new_folder),
+                  title: const Text('Tag-based download folders'),
+                  subtitle: const Text('Sort downloads into subfolders by tags'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const TagFolderRulesPage(),
+                    ),
+                  ),
+                ),
+              ],
               ValueListenableBuilder<bool>(
                 valueListenable: settings.upvoteFavs,
                 builder: (context, value, child) => SwitchListTile(
