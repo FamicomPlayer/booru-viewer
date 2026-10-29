@@ -128,7 +128,7 @@ class CommentClient {
     required bool replace,
   }) {
     if (engine != BooruEngine.e621) {
-      return Future.value(VoteResult(id: id, score: 0, ourScore: upvote ? 1 : -1));
+      return Future.value(VoteResult(score: 0, ourScore: upvote ? 1 : -1));
     }
     return dio
         .post(

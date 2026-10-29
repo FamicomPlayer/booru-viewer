@@ -79,6 +79,7 @@ class AccountClient {
         avatarId: null,
         hasCroppedAvatar: false,
         blacklistedTags: traits.value.denylist.join('\n'),
+        perPage: null,
       );
     }
 

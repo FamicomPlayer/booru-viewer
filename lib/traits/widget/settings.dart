@@ -48,9 +48,9 @@ class DenyListPage extends StatelessWidget {
                   Navigator.of(dialogContext).pop();
                   final storage = context.read<AppStorage>();
                   final source =
-                      await storage.sqlite.traitsRepository.getOrNull(id.id);
+                      await TraitsRepository(storage.sqlite).getOrNull(id.id);
                   if (source != null && source.denylist.isNotEmpty) {
-                    final merged = {
+                    final List<String> merged = <String>{
                       ...traits.denylist,
                       ...source.denylist,
                     }.toList();
