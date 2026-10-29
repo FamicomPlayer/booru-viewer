@@ -30,6 +30,38 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
+      - name: Configure Keystore
+        run: |
+          mkdir -p "$HOME/.config/.android"
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v \
+            -keystore "$HOME/.config/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          cp "$HOME/.config/.android/debug.keystore" "$HOME/.android/debug.keystore" || true
+
+          mkdir -p android/keys
+          keytool -genkeypair -v \
+            -keystore android/keys/release.keystore \
+            -storepass android \
+            -alias booru_key \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=BooruViewer,O=Booru,C=US"
+          cat << 'EOF' > android/keys/key.properties
+          storePassword=android
+          keyPassword=android
+          keyAlias=booru_key
+          storeFile=release.keystore
+          EOF
+
       - name: Determine Flutter Version
         run: |
           if [ -n "${{ github.event.inputs.flutter_version }}" ]; then
@@ -70,6 +102,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/*.apk
+          files: |
+            build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
