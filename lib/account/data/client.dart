@@ -23,12 +23,12 @@ class AccountClient {
 
   BooruEngine get engine => BooruEngine.fromHost(identity.host);
 
-  Future<void> available() {
+  Future<void> available() async {
     switch (engine) {
       case BooruEngine.derpibooru:
-        return dio.get('/api/v1/json/images/1');
+        await dio.get('/api/v1/json/images/1');
       case BooruEngine.rule34:
-        return dio.get('/index.php', queryParameters: {
+        await dio.get('/index.php', queryParameters: {
           'page': 'dapi',
           's': 'post',
           'q': 'index',
@@ -36,7 +36,7 @@ class AccountClient {
           'limit': 1,
         });
       case BooruEngine.e621:
-        return dio.head('/status.json');
+        await dio.head('/status.json');
     }
   }
 

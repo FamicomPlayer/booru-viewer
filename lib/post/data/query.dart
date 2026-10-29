@@ -28,7 +28,7 @@ extension PostQuerying on PostClient {
     final normalized = _normalize(query);
     final tags = TagMap(normalized?['tags']);
     final order = tags['order'];
-    final username = identity.username;
+    final username = identity?.username;
 
     if (tags.length == 2 && order == 'pool') {
       final poolId = int.tryParse(tags['pool'] ?? '');
@@ -63,7 +63,7 @@ extension PostQuerying on PostClient {
       tags['order'] = 'pool';
       return {...?query, 'tags': tags.toString()};
     }
-    final username = identity.username;
+    final username = identity?.username;
     if (username != null && tags['fav'] == username) {
       tags['order'] = 'fav';
       return {...?query, 'tags': tags.toString()};

@@ -54,7 +54,8 @@ jobs:
 
       - name: List Generated APKs
         run: |
-          ls -la build/app/outputs/flutter-apk/
+          ls -la build/app/outputs/flutter-apk/ 2>/dev/null || true
+          ls -la build/app/outputs/apk/release/ 2>/dev/null || true
 
       - name: Upload APKs as Artifacts
         uses: actions/upload-artifact@v4
@@ -62,6 +63,7 @@ jobs:
           name: booru-viewer-apks
           path: |
             build/app/outputs/flutter-apk/*.apk
+            build/app/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Create Release on Tag

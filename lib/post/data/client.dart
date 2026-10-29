@@ -15,15 +15,16 @@ class PostClient {
     required this.dio,
     required this.pools,
     required this.traits,
-    required this.identity,
+    this.identity,
   });
 
   final Dio dio;
   final PoolClient pools;
   final ValueNotifier<Traits> traits;
-  final Identity identity;
+  final Identity? identity;
 
-  BooruEngine get engine => BooruEngine.fromHost(identity.host);
+  BooruEngine get engine =>
+      identity != null ? BooruEngine.fromHost(identity!.host) : BooruEngine.e621;
 
   Future<Post> get({required int id, CancelToken? cancelToken}) {
     switch (engine) {
@@ -295,9 +296,9 @@ class PostClient {
             .then(_filter);
 
       case BooruEngine.rule34:
-        final userId = identity.headers?['user_id'] ??
-            (identity.username != null && int.tryParse(identity.username!) != null
-                ? identity.username
+        final userId = identity?.headers?['user_id'] ??
+            (identity?.username != null && int.tryParse(identity!.username!) != null
+                ? identity!.username
                 : null);
         final favTag = (userId != null && userId.isNotEmpty) ? 'fav:$userId' : 'vote:3';
         final pid = (page != null && page > 0) ? (page - 1) : 0;

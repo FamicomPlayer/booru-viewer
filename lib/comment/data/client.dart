@@ -79,10 +79,10 @@ class CommentClient {
     }
   }
 
-  Future<void> create({required int postId, required String content}) {
+  Future<void> create({required int postId, required String content}) async {
     switch (engine) {
       case BooruEngine.derpibooru:
-        return dio.post(
+        await dio.post(
           '/api/v1/json/comments',
           data: {
             'comment': {
@@ -92,7 +92,7 @@ class CommentClient {
           },
         );
       case BooruEngine.rule34:
-        return dio.post(
+        await dio.post(
           '/index.php?page=comment&s=save',
           data: FormData.fromMap({
             'comment': content,
@@ -100,7 +100,7 @@ class CommentClient {
           }),
         );
       case BooruEngine.e621:
-        return dio.post(
+        await dio.post(
           '/comments.json',
           data: FormData.fromMap({
             'comment[body]': content,
@@ -114,9 +114,9 @@ class CommentClient {
     required int id,
     required int postId,
     required String content,
-  }) {
-    if (engine != BooruEngine.e621) return Future.value();
-    return dio.patch(
+  }) async {
+    if (engine != BooruEngine.e621) return;
+    await dio.patch(
       '/comments/$id.json',
       data: FormData.fromMap({'comment[body]': content}),
     );
