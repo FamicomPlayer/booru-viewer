@@ -79,7 +79,6 @@ class _PostDetailGalleryState extends State<PostDetailGallery>
             context,
             index,
             items ?? [],
-            reach: 3,
           );
         });
 
@@ -128,7 +127,6 @@ class _PostDetailGalleryState extends State<PostDetailGallery>
                   context,
                   index,
                   items ?? [],
-                  reach: 3,
                 );
               },
             ),
