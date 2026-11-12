@@ -23,7 +23,6 @@ class TimedText extends StatelessWidget {
       children: [
         Flexible(child: child),
         Flexible(
-          fit: FlexFit.loose,
           child: Text(
             ' • ${created.relativeTime(context)}'
             '${updated != null && updated!.isAfter(created) ? ' (edited)' : ''}',

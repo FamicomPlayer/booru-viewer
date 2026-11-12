@@ -50,7 +50,6 @@ class _PostFullscreenGalleryState extends State<PostFullscreenGallery>
             context,
             index,
             items ?? [],
-            reach: 3,
           );
         });
 
@@ -88,7 +87,6 @@ class _PostFullscreenGalleryState extends State<PostFullscreenGallery>
                       context,
                       index,
                       items ?? [],
-                      reach: 3,
                     );
                   },
                   builderDelegate: defaultPagedChildBuilderDelegate(

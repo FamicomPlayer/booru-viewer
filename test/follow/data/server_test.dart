@@ -92,6 +92,32 @@ void main() {
     expect(await refreshed.timeout(const Duration(seconds: 2)), [follow.id]);
   });
 
+  test('a sync asks for no more posts than a page holds', () async {
+    for (int index = 0; index < 25; index++) {
+      await client.follows.create(
+        tags: 'paged_$index',
+        type: FollowType.update,
+      );
+    }
+    addTearDown(() async {
+      for (int index = 0; index < 25; index++) {
+        final follow = await client.follows.getByTags(tags: 'paged_$index');
+        if (follow != null) await client.follows.delete(follow.id);
+      }
+    });
+
+    await client.followServer
+        .sync(force: true)
+        .timeout(const Duration(seconds: 10));
+
+    final limits = fake.requests
+        .where((e) => e.path == '/posts.json')
+        .map((e) => int.parse(e.query['limit']!));
+    expect(limits, isNotEmpty);
+    // The site cuts longer pages short, which goes unnoticed by the sync.
+    expect(limits, everyElement(lessThanOrEqualTo(320)));
+  });
+
   test('a cancelled sync ends and lets the next one run', () async {
     final first = client.followServer.sync(force: true);
     final cancelled = client.followServer.currentSync!..cancel();
