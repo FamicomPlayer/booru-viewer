@@ -153,7 +153,7 @@ class FollowSync {
 
         // Only e621 has a search that takes several follows at once and still
         // tells which of them a post belongs to.
-        List<Follow> singles = engine == BooruEngine.e621
+        List<Follow> singles = true
             ? follows.where((e) => e.isSingle).toList()
             : [];
         if (singles.isNotEmpty) {
