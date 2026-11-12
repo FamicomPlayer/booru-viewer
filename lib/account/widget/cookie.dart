@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:collection/collection.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/logs/logs.dart';
@@ -187,25 +186,6 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
 
       // Query raw cookies from native CookieManager
       for (final domain in cookieDomains) {
-        try {
-          final rawNative = await cookieManager.getCookieString(domain);
-          if (rawNative != null && rawNative.isNotEmpty) {
-            for (final part in rawNative.split(';')) {
-              final trimmed = part.trim();
-              final eqIdx = trimmed.indexOf('=');
-              if (eqIdx > 0) {
-                final k = trimmed.substring(0, eqIdx).trim();
-                final v = trimmed.substring(eqIdx + 1).trim();
-                if (k.isNotEmpty && v.isNotEmpty) {
-                  jar[k] = v;
-                  final kLower = k.toLowerCase();
-                  if (kLower == 'user_id' && v.isNotEmpty) foundUserId ??= v;
-                  if (kLower == 'pass_hash' && v.isNotEmpty) foundPassHash ??= v;
-                }
-              }
-            }
-          }
-        } catch (_) {}
         try {
           final cList = await cookieManager.getCookies(domain);
           for (final c in cList) {
