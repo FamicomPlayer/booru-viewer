@@ -19,13 +19,52 @@ class CookieCapturePage extends StatefulWidget {
     this.targetHost,
     this.engine,
     this.onCookiesCaptured,
+    this.identity,
+    this.newAccount = false,
   });
+
+  /// The page on which to log into the website of [host], for the favorites
+  /// that Rule34 and Derpibooru only take from a browser.
+  factory CookieCapturePage.login({
+    Key? key,
+    required String host,
+    int? identity,
+    void Function(Map<String, String> headers, List<Cookie> cookies)?
+    onCookiesCaptured,
+  }) {
+    final BooruEngine engine = BooruEngine.fromHost(host);
+    final bool isRule34 = engine == BooruEngine.rule34;
+    return CookieCapturePage(
+      key: key,
+      title: Text(
+        isRule34 ? 'Rule34 Web Login' : '${engine.displayName} Web Login',
+      ),
+      initialUrl: switch (engine) {
+        BooruEngine.rule34 =>
+          'https://rule34.xxx/index.php?page=account&s=login',
+        BooruEngine.derpibooru => '${normalizeHostUrl(host)}/sessions/new',
+        BooruEngine.e621 => null,
+      },
+      targetHost: isRule34 ? 'https://rule34.xxx' : host,
+      engine: engine,
+      onCookiesCaptured: onCookiesCaptured,
+      identity: identity,
+    );
+  }
 
   final Widget? title;
   final String? initialUrl;
   final String? targetHost;
   final BooruEngine? engine;
   final void Function(Map<String, String> headers, List<Cookie> cookies)? onCookiesCaptured;
+
+  /// The id of the identity that a login is made for. Without one it is made
+  /// for the identity in use.
+  final int? identity;
+
+  /// Whether a login is made for an account that is yet to be added, and so
+  /// for none of the identities there are.
+  final bool newAccount;
 
   @override
   State<CookieCapturePage> createState() => _CookieCapturePageState();
@@ -182,17 +221,36 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
 
   /// Whether [url] belongs to the site whose login is captured here.
   bool _isSiteUrl(String url) {
-    final String? host = Uri.tryParse(url)?.host;
+    final String? host = Uri.tryParse(url)?.host.toLowerCase();
     if (host == null || host.isEmpty) return false;
-    if (_engine == BooruEngine.rule34) return host.endsWith('rule34.xxx');
+    if (_engine == BooruEngine.rule34) {
+      return host == 'rule34.xxx' || host.endsWith('.rule34.xxx');
+    }
     return host == Uri.tryParse(normalizeHostUrl(_effectiveHost))?.host;
   }
+
+  /// The identity that a login made on this page is meant for.
+  Future<Identity?> _preferred(IdentityClient idClient) async {
+    if (widget.newAccount) return null;
+    final int id = widget.identity ?? idClient.identity.id;
+    return (await idClient.all()).where((e) => e.id == id).firstOrNull;
+  }
+
+  /// Whether the first page has yet to be looked at. The login found on it
+  /// was made some time before, and not for what this page was opened for.
+  bool _firstLook = true;
 
   /// Saves the login as soon as a page shows that there is one.
   Future<void> _autoDetectLogin() async {
     try {
       if (controller == null || _engine == BooruEngine.e621) return;
-      final ok = await _saveCookies(showToast: false, loginOnly: true);
+      final bool firstLook = _firstLook;
+      _firstLook = false;
+      final ok = await _saveCookies(
+        showToast: false,
+        loginOnly: true,
+        firstLook: firstLook,
+      );
       if (ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -207,9 +265,14 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
 
   /// Stores the login of the page on an identity. Without a login, and
   /// unless [loginOnly], the clearance of a Cloudflare check is kept instead.
+  ///
+  /// On the [firstLook] at the page, a login that is another account's than
+  /// the one asked for is not stored: the browser is logged out instead, so
+  /// that the right account can be logged into.
   Future<bool> _saveCookies({
     bool showToast = true,
     bool loginOnly = false,
+    bool firstLook = false,
   }) async {
     if (_saving) return false;
     setState(() => _saving = true);
@@ -266,6 +329,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       // A login is only taken for one when the site itself vouches for it:
       // by its session cookies on Rule34, by its own page on Derpibooru.
       String? username;
+      // Who the site takes its visitor for, where it tells.
+      String? account;
       switch (_engine) {
         case BooruEngine.rule34:
           ({String? username, String? apiKey, Map<String, String> cookies})?
@@ -281,6 +346,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           final session = rule34SessionOf(jar);
           if (session == null) break;
           username = page?.username ?? 'User #${session.userId}';
+          account = session.userId;
           headers['user_id'] = session.userId;
           headers['pass_hash'] = session.passHash;
           headers[HttpHeaders.cookieHeader] = formatCookies(jar);
@@ -297,14 +363,38 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           if (!page.signedIn) break;
           if (!jar.keys.any(philomenaSessionCookies.contains)) break;
           username = page.userName ?? 'Derpibooru User';
+          account = page.userName;
           headers[HttpHeaders.cookieHeader] = formatCookies(jar);
         case BooruEngine.e621:
           break;
       }
 
+      final Identity? preferred = await _preferred(idClient);
+
       if (username != null) {
+        final String? expected = preferred == null
+            ? null
+            : webAccountOf(preferred);
+        final bool another =
+            widget.newAccount ||
+            (expected != null &&
+                account != null &&
+                expected != account.trim().toLowerCase());
+        if (firstLook && another) {
+          // Left in the browser by an earlier login. Storing it would hand
+          // one account the login of another, and leave no way to change it.
+          await cookieManager.clearCookies();
+          await controller?.loadRequest(Uri.parse(_targetUrl));
+          return false;
+        }
         widget.onCookiesCaptured?.call(headers, allCookies);
-        await _storeLogin(idClient, username: username, headers: headers);
+        await _storeLogin(
+          idClient,
+          username: username,
+          account: account,
+          headers: headers,
+          preferred: preferred,
+        );
         if (showToast && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -318,14 +408,33 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       if (loginOnly) return false;
 
       // Without a login this page resolves Cloudflare challenges, of which
-      // only the clearance is kept, on the identity that is in use.
-      final cleared = withCloudflareCookies(idClient.identity.headers, jar);
+      // only the clearance is kept, and only by an identity of this site.
+      final bool ownSite =
+          preferred != null &&
+          webLoginTarget(
+                identities: [preferred],
+                host: _effectiveHost,
+                account: null,
+                preferred: preferred,
+              ) !=
+              null;
+      final cleared = withCloudflareCookies(
+        ownSite ? preferred.headers : null,
+        jar,
+      );
       if (cleared != null) {
         // The clearance only holds for the browser that earned it.
         if (userAgent != null) {
           cleared[HttpHeaders.userAgentHeader] = userAgent;
         }
-        await idClient.replace(idClient.identity.copyWith(headers: cleared));
+        if (ownSite) {
+          await idClient.replace(preferred.copyWith(headers: cleared));
+        } else if (widget.onCookiesCaptured != null) {
+          // For an identity that is yet to be added by who opened this page.
+          widget.onCookiesCaptured!(cleared, allCookies);
+        } else {
+          return false;
+        }
         return true;
       }
 
@@ -357,22 +466,22 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
     }
   }
 
-  /// Stores a captured login on one identity of this site and makes it the
-  /// active one. Other identities may be other accounts and are left alone.
+  /// Stores a captured login on the identity of its account and makes that
+  /// the active one. Identities of other accounts are left alone, and an
+  /// account that has none yet is given a new one.
   Future<void> _storeLogin(
     IdentityClient idClient, {
     required String username,
+    required String? account,
     required Map<String, String> headers,
+    required Identity? preferred,
   }) async {
-    bool isSite(Identity identity) =>
-        BooruEngine.fromHost(identity.host) == _engine &&
-        (_engine == BooruEngine.rule34 ||
-            normalizeHostUrl(identity.host) ==
-                normalizeHostUrl(_effectiveHost));
-
-    final Identity? target = isSite(idClient.identity)
-        ? idClient.identity
-        : (await idClient.all()).where(isSite).firstOrNull;
+    final Identity? target = webLoginTarget(
+      identities: await idClient.all(),
+      host: _effectiveHost,
+      account: account,
+      preferred: preferred,
+    );
 
     if (target == null) {
       final created = await idClient.add(
@@ -395,13 +504,11 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       merged.remove('api_key');
     }
     merged.addAll(headers);
-    final String? existing = target.username;
     await idClient.replace(
       target.copyWith(
-        username:
-            existing != null && existing.isNotEmpty && existing != 'Anonymous'
-            ? existing
-            : username,
+        username: isPlaceholderUsername(target.username)
+            ? username
+            : target.username,
         headers: merged,
       ),
     );
@@ -409,7 +516,6 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       await idClient.activate(target.id);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {

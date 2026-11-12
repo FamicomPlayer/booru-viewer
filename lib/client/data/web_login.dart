@@ -76,6 +76,11 @@ extension IdentityWebLogin on Identity {
   /// asks for a login made in a browser.
   bool get needsWebLogin => BooruEngine.fromHost(host) != BooruEngine.e621;
 
+  /// Whether this identity holds the API key that Derpibooru lists the
+  /// favorites and votes of its user for.
+  bool get hasDerpibooruKey =>
+      (headers?['key'] ?? headers?['X-API-Key'])?.isNotEmpty ?? false;
+
   /// Whether a browser login is stored for this identity.
   bool get hasWebLogin => switch (BooruEngine.fromHost(host)) {
     BooruEngine.rule34 => rule34Session != null,
@@ -94,6 +99,72 @@ class WebLoginException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// The names that an identity is given where the one of its user is not
+/// known, which tell nothing of whose it is.
+final RegExp _placeholderName = RegExp(
+  r'^(anonymous|derpibooru user|rule34 user)$',
+  caseSensitive: false,
+);
+
+/// Whether [name] stands in for a name that is not known.
+bool isPlaceholderUsername(String? name) =>
+    name == null || name.trim().isEmpty || _placeholderName.hasMatch(name.trim());
+
+/// The site that [host] is a part of, as its subdomains are.
+String _siteOf(String host) {
+  final String name = Uri.tryParse(normalizeHostUrl(host))?.host ?? host;
+  final List<String> labels = name.toLowerCase().split('.');
+  return labels.skip(labels.length > 2 ? labels.length - 2 : 0).join('.');
+}
+
+/// The account that the website of [identity] knows it as, where that can
+/// be told: the id of the user on Rule34, the name of the user on Derpibooru.
+String? webAccountOf(Identity identity) {
+  final String? name = identity.username?.trim();
+  switch (BooruEngine.fromHost(identity.host)) {
+    case BooruEngine.rule34:
+      final String? id =
+          identity.headers?['user_id'] ??
+          identity.cookies['user_id'] ??
+          name?.replaceFirst(RegExp('^User #'), '');
+      return id != null && int.tryParse(id) != null ? id : null;
+    case BooruEngine.derpibooru:
+      return isPlaceholderUsername(name) ? null : name!.toLowerCase();
+    case BooruEngine.e621:
+      return null;
+  }
+}
+
+/// The identity among [identities] that a browser login of [account] on the
+/// site of [host] is stored on, or null where it takes a new one.
+///
+/// [preferred] is the identity that the login was made for. It is passed
+/// over where it is known to be another account: the login of one account
+/// must never end up on the identity of another.
+Identity? webLoginTarget({
+  required Iterable<Identity> identities,
+  required String host,
+  required String? account,
+  Identity? preferred,
+}) {
+  final BooruEngine engine = BooruEngine.fromHost(host);
+  bool onSite(Identity identity) =>
+      BooruEngine.fromHost(identity.host) == engine &&
+      _siteOf(identity.host) == _siteOf(host);
+
+  if (preferred != null && !onSite(preferred)) preferred = null;
+  final String? known = account?.trim().toLowerCase();
+  // Whose login this is could not be told, so it stays where it was asked for.
+  if (known == null || known.isEmpty) return preferred;
+  if (preferred != null && webAccountOf(preferred) == known) return preferred;
+  for (final Identity identity in identities) {
+    if (onSite(identity) && webAccountOf(identity) == known) return identity;
+  }
+  // An identity that is nobody's yet takes the login as its own.
+  if (preferred != null && webAccountOf(preferred) == null) return preferred;
+  return null;
 }
 
 /// What a page of a Philomena site tells about its visitor.
