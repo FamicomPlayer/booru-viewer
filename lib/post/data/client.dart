@@ -27,6 +27,58 @@ class PostClient {
   BooruEngine get engine =>
       identity != null ? BooruEngine.fromHost(identity!.host) : BooruEngine.e621;
 
+  /// Query shared by every Rule34 post request.
+  static const Map<String, dynamic> _rule34PostQuery = {
+    'page': 'dapi',
+    's': 'post',
+    'q': 'index',
+    'json': '1',
+    // Has the server name the category of each tag, which otherwise takes
+    // scraping the post page.
+    'fields': 'tag_info',
+  };
+
+  static List<Post> _rule34Posts(Object? data) {
+    final List<dynamic> list = switch (data) {
+      List() => data,
+      {'post': final List<dynamic> posts} => posts,
+      _ => const [],
+    };
+    return list.map(Rule34Post.fromJson).toList();
+  }
+
+  static final RegExp _shortRating = RegExp(
+    r'^(-?)rating:(s|q|e)$',
+    caseSensitive: false,
+  );
+
+  /// Rule34 only knows ratings by their full name.
+  static String _rule34Tags(String tags) => tags
+      .split(RegExp(r'\s+'))
+      .where((tag) => tag.isNotEmpty)
+      .map((tag) {
+        final match = _shortRating.firstMatch(tag);
+        if (match == null) return tag;
+        final rating = switch (match.group(2)!.toLowerCase()) {
+          's' => 'safe',
+          'q' => 'questionable',
+          _ => 'explicit',
+        };
+        return '${match.group(1)}rating:$rating';
+      })
+      .join(' ');
+
+  /// The numeric id of the logged in Rule34 user.
+  String? get rule34UserId {
+    final username = identity?.username;
+    final name = username != null && username.startsWith('User #')
+        ? username.substring(6).trim()
+        : username;
+    return identity?.headers?['user_id'] ??
+        _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
+        (name != null && int.tryParse(name) != null ? name : null);
+  }
+
   Future<Post> get({required int id, CancelToken? cancelToken}) {
     switch (engine) {
       case BooruEngine.derpibooru:
@@ -37,24 +89,11 @@ class PostClient {
         return dio
             .get(
               '/index.php',
-              queryParameters: {
-                'page': 'dapi',
-                's': 'post',
-                'q': 'index',
-                'json': '1',
-                'id': id,
-              },
+              queryParameters: {..._rule34PostQuery, 'id': id},
               cancelToken: cancelToken,
             )
             .then((r) async {
-              final data = r.data;
-              Post? post;
-              if (data is List && data.isNotEmpty) {
-                post = Rule34Post.fromJson(data.first);
-              } else if (data is Map && data.containsKey('post')) {
-                final posts = data['post'] as List;
-                if (posts.isNotEmpty) post = Rule34Post.fromJson(posts.first);
-              }
+              final post = _rule34Posts(r.data).firstOrNull;
               if (post != null) {
                 return Rule34Post.resolveTagCategories(post, dio);
               }
@@ -108,15 +147,7 @@ class PostClient {
           if (tags.startsWith('fav:')) {
             var userId = tags.substring(4).trim();
             if (userId.isEmpty || int.tryParse(userId) == null) {
-              final uname = identity?.username;
-              final parsedFromUname = uname != null && uname.startsWith('User #')
-                  ? uname.substring(6).trim()
-                  : uname;
-              userId = identity?.headers?['user_id'] ??
-                  _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
-                  (parsedFromUname != null && int.tryParse(parsedFromUname) != null
-                      ? parsedFromUname
-                      : '');
+              userId = rule34UserId ?? '';
             }
             if (userId.isNotEmpty) {
               return _rule34Favorites(
@@ -128,20 +159,14 @@ class PostClient {
             }
             return Future.value([]);
           }
-          tags = tags
-              .replaceAll('rating:safe', 'rating:s')
-              .replaceAll('rating:questionable', 'rating:q')
-              .replaceAll('rating:explicit', 'rating:e');
+          tags = _rule34Tags(tags);
         }
         final pid = (page != null && page > 0) ? (page - 1) : 0;
         return dio
             .get(
               '/index.php',
               queryParameters: {
-                'page': 'dapi',
-                's': 'post',
-                'q': 'index',
-                'json': '1',
+                ..._rule34PostQuery,
                 if (tags != null && tags.isNotEmpty) 'tags': tags,
                 'pid': pid,
                 if (limit != null) 'limit': limit,
@@ -149,14 +174,7 @@ class PostClient {
               cancelToken: cancelToken,
             )
             .then((r) {
-              final data = r.data;
-              List list = const [];
-              if (data is List) {
-                list = data;
-              } else if (data is Map && data.containsKey('post')) {
-                list = data['post'] as List;
-              }
-              final posts = list.map(Rule34Post.fromJson).toList();
+              final posts = _rule34Posts(r.data);
               Rule34Post.prefetchPostsTags(posts, dio);
               return posts;
             })
@@ -191,42 +209,27 @@ class PostClient {
     if (ids.isEmpty) return [];
 
     if (engine == BooruEngine.rule34) {
-      const int batchSize = 5;
-      final List<Post> result = [];
-      for (int i = 0; i < ids.length; i += batchSize) {
-        final chunk = ids.sublist(i, min(i + batchSize, ids.length));
-        final posts = await Future.wait(
-          chunk.map((id) async {
-            try {
-              final response = await dio.get(
-                '/index.php',
-                queryParameters: {
-                  'page': 'dapi',
-                  's': 'post',
-                  'q': 'index',
-                  'json': '1',
-                  'id': id,
-                },
-                cancelToken: cancelToken,
-              );
-              final data = response.data;
-              if (data is List && data.isNotEmpty) {
-                return Rule34Post.fromJson(data.first);
-              } else if (data is Map && data.containsKey('post')) {
-                final list = data['post'] as List;
-                if (list.isNotEmpty) return Rule34Post.fromJson(list.first);
-              }
-            } catch (_) {}
-            return null;
-          }),
-        );
-        result.addAll(posts.whereType<Post>());
-        if (i + batchSize < ids.length) {
-          await Future.delayed(const Duration(milliseconds: 80));
+      // The API has no lookup for several ids and answers bursts with 429,
+      // so the ids are fetched as a trickle.
+      const int concurrency = 2;
+      final List<Post?> result = List.filled(ids.length, null);
+      int next = 0;
+      Future<void> worker() async {
+        while (next < ids.length) {
+          final int index = next++;
+          final response = await dio.get(
+            '/index.php',
+            queryParameters: {..._rule34PostQuery, 'id': ids[index]},
+            cancelToken: cancelToken,
+          );
+          result[index] = _rule34Posts(response.data).firstOrNull;
         }
       }
-      debugPrint('Rule34 byIds completed: fetched ${result.length} of ${ids.length} posts');
-      return _filter(result);
+
+      await Future.wait(
+        List.generate(min(concurrency, ids.length), (_) => worker()),
+      );
+      return _filter(result.nonNulls.toList());
     }
 
     if (engine == BooruEngine.derpibooru) {
@@ -300,7 +303,7 @@ class PostClient {
           : '(${chunk.map((e) => e.replaceAll('_', ' ')).join(' || ')})',
       BooruEngine.rule34 => chunk.length == 1
           ? chunk.first.replaceAll(' ', '_')
-          : '{${chunk.map((e) => e.replaceAll(' ', '_')).join(' ')}}',
+          : '( ${chunk.map((e) => e.replaceAll(' ', '_')).join(' ~ ')} )',
       BooruEngine.e621 => chunk.map((e) => '~$e').join(' '),
     };
 
@@ -364,11 +367,7 @@ class PostClient {
             .then(_filter);
 
       case BooruEngine.rule34:
-        final userId = identity?.headers?['user_id'] ??
-            _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
-            (identity?.username != null && int.tryParse(identity!.username!) != null
-                ? identity!.username
-                : null);
+        final userId = rule34UserId;
         if (userId != null && userId.isNotEmpty) {
           return _rule34Favorites(
             userId: userId,
