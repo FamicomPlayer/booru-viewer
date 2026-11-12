@@ -6,8 +6,8 @@ import 'package:e1547/app/data/storage.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/post/post.dart';
 import 'package:flutter/widgets.dart';
-import 'package:provider/provider.dart';
 import 'package:html/parser.dart' show parse;
+import 'package:provider/provider.dart';
 
 abstract final class Rule34Post {
   static final Map<String, int> _tagCategoryCache = {};
@@ -56,26 +56,39 @@ abstract final class Rule34Post {
     'big_areolae', 'big_nipples', 'areolae_visible_through_clothing',
   };
 
-  static const int _maxTagCacheEntries = 500;
+  // A single page of results carries well over a thousand distinct tags.
+  static const int _maxTagCacheEntries = 20000;
+
+  /// Tag categories as named by the `tag_info` field of the API.
+  static const Map<String, int> _serverTagTypes = {
+    'tag': 0,
+    'artist': 1,
+    'copyright': 3,
+    'character': 4,
+    'metadata': 5,
+  };
 
   static void initDatabase(AppDatabase db) {
-    // No-op: tag caching is kept strictly in-memory (max 500 entries) to avoid disk storage bloat.
+    // No-op: tag caching is kept strictly in-memory to avoid disk storage bloat.
   }
 
   static void markFavorited(int id, bool fav, {Post? post, String host = 'rule34.xxx'}) {
+    // Ids of other sites would collide with those of Rule34.
+    final bool isRule34 = host.toLowerCase().contains('rule34');
     if (fav) {
-      _favoritedPostIds.add(id);
+      if (isRule34) _favoritedPostIds.add(id);
       if (post != null) {
         LocalFavorites.save(host, post);
       }
     } else {
-      _favoritedPostIds.remove(id);
+      if (isRule34) _favoritedPostIds.remove(id);
       LocalFavorites.remove(host, id);
     }
   }
 
   static bool isFavorited(int id) =>
-      _favoritedPostIds.contains(id) || LocalFavorites.isFavorited(id);
+      _favoritedPostIds.contains(id) ||
+      LocalFavorites.isFavorited('rule34.xxx', id);
 
   static int? getCachedTagCategory(String tag) {
     final norm = tag.trim().toLowerCase();
@@ -87,6 +100,8 @@ abstract final class Rule34Post {
 
   static void cacheTagCategory(String tag, int category, {bool persist = false}) {
     final norm = tag.trim().toLowerCase().replaceAll(' ', '_');
+    // Reinserting keeps recently written tags at the far end of the eviction order.
+    _tagCategoryCache.remove(norm);
     if (_tagCategoryCache.length >= _maxTagCacheEntries) {
       _tagCategoryCache.remove(_tagCategoryCache.keys.first);
     }
@@ -160,9 +175,13 @@ abstract final class Rule34Post {
     return 0;
   }
 
+  /// Sorts [tags] into categories. [known] holds categories that are already
+  /// established for this post and outrank the guesses of
+  /// [categorizeTagInstantly].
   static Map<String, List<String>> categorizeAllTags(
     List<String> tags, {
     String source = '',
+    Map<String, int> known = const {},
   }) {
     final Map<String, List<String>> map = {
       'artist': [],
@@ -183,7 +202,9 @@ abstract final class Rule34Post {
       } else if (tag.startsWith('meta:')) {
         map['meta']!.add(tag.replaceFirst('meta:', ''));
       } else {
-        final cat = categorizeTagInstantly(tag, source: source);
+        final cat = getCachedTagCategory(tag) ??
+            known[tag] ??
+            categorizeTagInstantly(tag, source: source);
         switch (cat) {
           case 1:
             map['artist']!.add(tag);
@@ -252,8 +273,8 @@ abstract final class Rule34Post {
 
     final source = post.sources.join(' ').toLowerCase();
 
-    // Check if HTML scrape is needed (e.g. any tags that might be artist or not yet in cache)
-    final needsScrape = (post.tags['artist']?.isEmpty ?? true) ||
+    // The page only needs scraping for tags whose category is still unknown.
+    final needsScrape =
         allExistingTags.any((t) => getCachedTagCategory(t) == null);
 
     if (needsScrape) {
@@ -287,7 +308,18 @@ abstract final class Rule34Post {
       } catch (_) {}
     }
 
-    final newTags = categorizeAllTags(allExistingTags.toList(), source: source);
+    // Categories the post already carries must survive tags leaving the cache.
+    final known = <String, int>{
+      for (final tag in post.tags['artist'] ?? const <String>[]) tag: 1,
+      for (final tag in post.tags['copyright'] ?? const <String>[]) tag: 3,
+      for (final tag in post.tags['character'] ?? const <String>[]) tag: 4,
+      for (final tag in post.tags['meta'] ?? const <String>[]) tag: 5,
+    };
+    final newTags = categorizeAllTags(
+      allExistingTags.toList(),
+      source: source,
+      known: known,
+    );
     final bool isFav = isFavorited(post.id) || post.isFavorited;
     return post.copyWith(tags: newTags, isFavorited: isFav);
   }
@@ -346,7 +378,8 @@ abstract final class Rule34Post {
                   _lastScrapeTime = DateTime.now();
 
                   final resolved = await resolveTagCategories(p, client.dio);
-                  client.posts.postCache.set(resolved);
+                  // An unchanged post would only wake every listener for nothing.
+                  if (resolved != p) client.posts.postCache.set(resolved);
                 } catch (_) {} finally {
                   _resolvingPostIds.remove(p.id);
                 }
@@ -388,7 +421,21 @@ abstract final class Rule34Post {
           .map(unescapeTag)
           .toList();
 
-      final tagMap = categorizeAllTags(tagList, source: source ?? '');
+      // Present when the request asked for `fields=tag_info`.
+      final serverCategories = <String, int>{};
+      for (final info in post('tag_info').asListOrEmpty((p) => p)) {
+        final name = info('tag').asStringOrNull();
+        final category = _serverTagTypes[info('type').asStringOrNull()];
+        if (name == null || category == null) continue;
+        serverCategories[unescapeTag(name)] = category;
+      }
+      serverCategories.forEach(cacheTagCategory);
+
+      final tagMap = categorizeAllTags(
+        tagList,
+        source: source ?? '',
+        known: serverCategories,
+      );
 
       // Rating
       final ratingStr = (post('rating').asStringOrNull() ?? 's').toLowerCase();
@@ -398,9 +445,11 @@ abstract final class Rule34Post {
         _ => Rating.s,
       };
 
-      // Created at date parsing
+      // The JSON API only reports the time of the last change.
       DateTime createdAt = DateTime.now();
-      final rawDate = post('created_at').asStringOrNull();
+      final rawDate =
+          post('created_at').asStringOrNull() ??
+          post('change').asStringOrNull();
       if (rawDate != null) {
         createdAt = _parseR34Date(rawDate) ?? createdAt;
       }
@@ -427,7 +476,7 @@ abstract final class Rule34Post {
         variants: null,
         tags: tagMap,
         uploaderId: post('creator_id').asIntOrNull() ?? 0,
-        uploaderName: null,
+        uploaderName: post('owner').asStringOrNull(),
         createdAt: createdAt,
         updatedAt: null,
         score: score,

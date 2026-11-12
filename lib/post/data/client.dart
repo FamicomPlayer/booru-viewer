@@ -27,6 +27,58 @@ class PostClient {
   BooruEngine get engine =>
       identity != null ? BooruEngine.fromHost(identity!.host) : BooruEngine.e621;
 
+  /// Query shared by every Rule34 post request.
+  static const Map<String, dynamic> _rule34PostQuery = {
+    'page': 'dapi',
+    's': 'post',
+    'q': 'index',
+    'json': '1',
+    // Has the server name the category of each tag, which otherwise takes
+    // scraping the post page.
+    'fields': 'tag_info',
+  };
+
+  static List<Post> _rule34Posts(Object? data) {
+    final List<dynamic> list = switch (data) {
+      List() => data,
+      {'post': final List<dynamic> posts} => posts,
+      _ => const [],
+    };
+    return list.map(Rule34Post.fromJson).toList();
+  }
+
+  static final RegExp _shortRating = RegExp(
+    r'^(-?)rating:(s|q|e)$',
+    caseSensitive: false,
+  );
+
+  /// Rule34 only knows ratings by their full name.
+  static String _rule34Tags(String tags) => tags
+      .split(RegExp(r'\s+'))
+      .where((tag) => tag.isNotEmpty)
+      .map((tag) {
+        final match = _shortRating.firstMatch(tag);
+        if (match == null) return tag;
+        final rating = switch (match.group(2)!.toLowerCase()) {
+          's' => 'safe',
+          'q' => 'questionable',
+          _ => 'explicit',
+        };
+        return '${match.group(1)}rating:$rating';
+      })
+      .join(' ');
+
+  /// The numeric id of the logged in Rule34 user.
+  String? get rule34UserId {
+    final username = identity?.username;
+    final name = username != null && username.startsWith('User #')
+        ? username.substring(6).trim()
+        : username;
+    return identity?.headers?['user_id'] ??
+        _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
+        (name != null && int.tryParse(name) != null ? name : null);
+  }
+
   Future<Post> get({required int id, CancelToken? cancelToken}) {
     switch (engine) {
       case BooruEngine.derpibooru:
@@ -37,24 +89,11 @@ class PostClient {
         return dio
             .get(
               '/index.php',
-              queryParameters: {
-                'page': 'dapi',
-                's': 'post',
-                'q': 'index',
-                'json': '1',
-                'id': id,
-              },
+              queryParameters: {..._rule34PostQuery, 'id': id},
               cancelToken: cancelToken,
             )
             .then((r) async {
-              final data = r.data;
-              Post? post;
-              if (data is List && data.isNotEmpty) {
-                post = Rule34Post.fromJson(data.first);
-              } else if (data is Map && data.containsKey('post')) {
-                final posts = data['post'] as List;
-                if (posts.isNotEmpty) post = Rule34Post.fromJson(posts.first);
-              }
+              final post = _rule34Posts(r.data).firstOrNull;
               if (post != null) {
                 return Rule34Post.resolveTagCategories(post, dio);
               }
@@ -86,21 +125,12 @@ class PostClient {
               .where((t) => t.isNotEmpty);
           q = tags.map((t) => t.replaceAll('_', ' ')).join(', ');
         }
-        return dio
-            .get(
-              '/api/v1/json/search/images',
-              queryParameters: {
-                if (q.isNotEmpty) 'q': q,
-                if (page != null) 'page': page,
-                if (limit != null) 'per_page': limit,
-              },
-              cancelToken: cancelToken,
-            )
-            .then((r) {
-              final images = r.data['images'] as List? ?? const [];
-              return images.map(DerpibooruPost.fromJson).toList();
-            })
-            .then(_filter);
+        return _derpibooruSearch(
+          q: q,
+          page: page,
+          limit: limit,
+          cancelToken: cancelToken,
+        );
 
       case BooruEngine.rule34:
         String? tags = query?['tags']?.toString();
@@ -108,15 +138,7 @@ class PostClient {
           if (tags.startsWith('fav:')) {
             var userId = tags.substring(4).trim();
             if (userId.isEmpty || int.tryParse(userId) == null) {
-              final uname = identity?.username;
-              final parsedFromUname = uname != null && uname.startsWith('User #')
-                  ? uname.substring(6).trim()
-                  : uname;
-              userId = identity?.headers?['user_id'] ??
-                  _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
-                  (parsedFromUname != null && int.tryParse(parsedFromUname) != null
-                      ? parsedFromUname
-                      : '');
+              userId = rule34UserId ?? '';
             }
             if (userId.isNotEmpty) {
               return _rule34Favorites(
@@ -128,20 +150,14 @@ class PostClient {
             }
             return Future.value([]);
           }
-          tags = tags
-              .replaceAll('rating:safe', 'rating:s')
-              .replaceAll('rating:questionable', 'rating:q')
-              .replaceAll('rating:explicit', 'rating:e');
+          tags = _rule34Tags(tags);
         }
         final pid = (page != null && page > 0) ? (page - 1) : 0;
         return dio
             .get(
               '/index.php',
               queryParameters: {
-                'page': 'dapi',
-                's': 'post',
-                'q': 'index',
-                'json': '1',
+                ..._rule34PostQuery,
                 if (tags != null && tags.isNotEmpty) 'tags': tags,
                 'pid': pid,
                 if (limit != null) 'limit': limit,
@@ -149,14 +165,7 @@ class PostClient {
               cancelToken: cancelToken,
             )
             .then((r) {
-              final data = r.data;
-              List list = const [];
-              if (data is List) {
-                list = data;
-              } else if (data is Map && data.containsKey('post')) {
-                list = data['post'] as List;
-              }
-              final posts = list.map(Rule34Post.fromJson).toList();
+              final posts = _rule34Posts(r.data);
               Rule34Post.prefetchPostsTags(posts, dio);
               return posts;
             })
@@ -178,6 +187,28 @@ class PostClient {
     }
   }
 
+  /// Searches Derpibooru with [q] in the site's own query syntax.
+  Future<List<Post>> _derpibooruSearch({
+    required String q,
+    int? page,
+    int? limit,
+    CancelToken? cancelToken,
+  }) => dio
+      .get(
+        '/api/v1/json/search/images',
+        queryParameters: {
+          if (q.isNotEmpty) 'q': q,
+          if (page != null) 'page': page,
+          if (limit != null) 'per_page': limit,
+        },
+        cancelToken: cancelToken,
+      )
+      .then((r) {
+        final images = r.data['images'] as List? ?? const [];
+        return images.map(DerpibooruPost.fromJson).toList();
+      })
+      .then(_filter);
+
   /// Filters out "broken" posts.
   List<Post> _filter(List<Post> posts) => posts
       .whereNot((post) => !post.isDeleted && post.file == null)
@@ -191,55 +222,37 @@ class PostClient {
     if (ids.isEmpty) return [];
 
     if (engine == BooruEngine.rule34) {
-      const int batchSize = 5;
-      final List<Post> result = [];
-      for (int i = 0; i < ids.length; i += batchSize) {
-        final chunk = ids.sublist(i, min(i + batchSize, ids.length));
-        final posts = await Future.wait(
-          chunk.map((id) async {
-            try {
-              final response = await dio.get(
-                '/index.php',
-                queryParameters: {
-                  'page': 'dapi',
-                  's': 'post',
-                  'q': 'index',
-                  'json': '1',
-                  'id': id,
-                },
-                cancelToken: cancelToken,
-              );
-              final data = response.data;
-              if (data is List && data.isNotEmpty) {
-                return Rule34Post.fromJson(data.first);
-              } else if (data is Map && data.containsKey('post')) {
-                final list = data['post'] as List;
-                if (list.isNotEmpty) return Rule34Post.fromJson(list.first);
-              }
-            } catch (_) {}
-            return null;
-          }),
-        );
-        result.addAll(posts.whereType<Post>());
-        if (i + batchSize < ids.length) {
-          await Future.delayed(const Duration(milliseconds: 80));
+      // The API has no lookup for several ids and answers bursts with 429,
+      // so the ids are fetched as a trickle.
+      const int concurrency = 2;
+      final List<Post?> result = List.filled(ids.length, null);
+      int next = 0;
+      Future<void> worker() async {
+        while (next < ids.length) {
+          final int index = next++;
+          try {
+            final response = await dio.get(
+              '/index.php',
+              queryParameters: {..._rule34PostQuery, 'id': ids[index]},
+              cancelToken: cancelToken,
+            );
+            result[index] = _rule34Posts(response.data).firstOrNull;
+          } on Object {
+            // Stops the other worker, the lookup has failed as a whole.
+            next = ids.length;
+            rethrow;
+          }
         }
       }
-      debugPrint('Rule34 byIds completed: fetched ${result.length} of ${ids.length} posts');
-      return _filter(result);
-    }
 
-    if (engine == BooruEngine.derpibooru) {
-      final filter = ids.map((id) => 'id:$id').join(' || ');
-      return page(
-        query: {'tags': filter},
-        limit: ids.length,
-        cancelToken: cancelToken,
+      await Future.wait(
+        List.generate(min(concurrency, ids.length), (_) => worker()),
       );
+      return _filter(result.nonNulls.toList());
     }
 
-    // Server-side maximum id and page request size for e621.
-    const int chunkSize = 320;
+    // Server-side maximum page request size.
+    final int chunkSize = engine == BooruEngine.derpibooru ? 50 : 320;
 
     List<List<int>> chunks = [];
     for (int i = 0; i < ids.length; i += chunkSize) {
@@ -248,12 +261,17 @@ class PostClient {
 
     List<Post> result = [];
     for (final chunk in chunks) {
-      String filter = 'id:${chunk.join(',')}';
-      List<Post> part = await page(
-        query: {'tags': filter},
-        limit: chunk.length,
-        cancelToken: cancelToken,
-      );
+      List<Post> part = engine == BooruEngine.derpibooru
+          ? await _derpibooruSearch(
+              q: chunk.map((id) => 'id:$id').join(' || '),
+              limit: chunk.length,
+              cancelToken: cancelToken,
+            )
+          : await page(
+              query: {'tags': 'id:${chunk.join(',')}'},
+              limit: chunk.length,
+              cancelToken: cancelToken,
+            );
       Map<int, Post> table = {for (Post e in part) e.id: e};
       result.addAll(
         (chunk.map((e) => table[e]).toList()..removeWhere((e) => e == null))
@@ -294,22 +312,33 @@ class PostClient {
         .take(chunkSize)
         .toList();
 
-    String filter = switch (engine) {
-      BooruEngine.derpibooru => chunk.length == 1
-          ? chunk.first.replaceAll('_', ' ')
-          : '(${chunk.map((e) => e.replaceAll('_', ' ')).join(' || ')})',
-      BooruEngine.rule34 => chunk.length == 1
-          ? chunk.first.replaceAll(' ', '_')
-          : '{${chunk.map((e) => e.replaceAll(' ', '_')).join(' ')}}',
-      BooruEngine.e621 => chunk.map((e) => '~$e').join(' '),
-    };
-
-    return this.page(
-      page: sitePage,
-      query: {'tags': filter},
-      limit: limit,
-      cancelToken: cancelToken,
-    );
+    switch (engine) {
+      case BooruEngine.derpibooru:
+        // Goes around page(), which would take this query apart as a tag list.
+        return _derpibooruSearch(
+          q: chunk.map((e) => e.replaceAll('_', ' ')).join(' || '),
+          page: sitePage,
+          limit: limit,
+          cancelToken: cancelToken,
+        );
+      case BooruEngine.rule34:
+        final names = chunk.map((e) => e.replaceAll(' ', '_'));
+        return this.page(
+          page: sitePage,
+          query: {
+            'tags': chunk.length == 1 ? names.first : '( ${names.join(' ~ ')} )',
+          },
+          limit: limit,
+          cancelToken: cancelToken,
+        );
+      case BooruEngine.e621:
+        return this.page(
+          page: sitePage,
+          query: {'tags': chunk.map((e) => '~$e').join(' ')},
+          limit: limit,
+          cancelToken: cancelToken,
+        );
+    }
   }
 
   Future<void> update({required int id, required Map<String, String?> data}) {
@@ -364,11 +393,7 @@ class PostClient {
             .then(_filter);
 
       case BooruEngine.rule34:
-        final userId = identity?.headers?['user_id'] ??
-            _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
-            (identity?.username != null && int.tryParse(identity!.username!) != null
-                ? identity!.username
-                : null);
+        final userId = rule34UserId;
         if (userId != null && userId.isNotEmpty) {
           return _rule34Favorites(
             userId: userId,
@@ -451,22 +476,20 @@ class PostClient {
               HttpHeaders.refererHeader: referer,
               'Referer': referer,
             },
-            validateStatus: (status) => status != null && status < 500,
           ),
         );
 
+        // The site answers 1 for an existing favorite, 2 without a session and
+        // anything else once the favorite was added.
         final body = response.data?.toString().trim() ?? '';
-        if (body == '1' || body == '3' || body.isEmpty || body.contains('favorited') || !body.contains('2')) {
-          Rule34Post.markFavorited(postId, true);
-          return;
-        }
         if (body == '2') {
           throw Exception('Failed to favorite on Rule34: session rejected');
         }
-        throw Exception('Failed to favorite on Rule34 (response: $body)');
+        Rule34Post.markFavorited(postId, true);
       case BooruEngine.derpibooru:
-        // Philomena favorites via API
-        break;
+        throw UnsupportedError(
+          'Derpibooru does not offer favoriting through its API',
+        );
       case BooruEngine.e621:
         await dio.post('/favorites.json', queryParameters: {'post_id': postId});
     }
@@ -524,7 +547,12 @@ class PostClient {
         );
         Rule34Post.markFavorited(postId, false);
       case BooruEngine.derpibooru:
-        break;
+        // Only favorites kept on this device can be taken back.
+        if (!LocalFavorites.isFavorited(identity!.host, postId)) {
+          throw UnsupportedError(
+            'Derpibooru does not offer favoriting through its API',
+          );
+        }
       case BooruEngine.e621:
         await dio.delete('/favorites/$postId.json');
     }
@@ -549,43 +577,33 @@ class PostClient {
     CancelToken? cancelToken,
   }) async {
     final pid = (page != null && page > 0) ? (page - 1) * 50 : 0;
-    try {
-      final response = await dio.get<String>(
-        'https://rule34.xxx/index.php',
-        queryParameters: {
-          'page': 'favorites',
-          's': 'view',
-          'id': userId,
-          'pid': pid,
-        },
-        options: Options(
-          responseType: ResponseType.plain,
-          validateStatus: (status) => status != null && status < 500,
-        ),
-        cancelToken: cancelToken,
-      );
-      final html = response.data ?? '';
-      final matches = RegExp(
-        r'id="p(\d+)"|page=post&(?:amp;)?s=view&(?:amp;)?id=(\d+)',
-      ).allMatches(html);
-      final ids = <int>{};
-      for (final m in matches) {
-        final idStr = m.group(1) ?? m.group(2);
-        if (idStr != null) {
-          final id = int.tryParse(idStr);
-          if (id != null) {
-            ids.add(id);
-            Rule34Post.markFavorited(id, true);
-          }
-        }
-      }
-      debugPrint('Rule34 favorites parsed ${ids.length} post IDs: ${ids.take(5)}');
-      if (ids.isEmpty) return [];
-      final posts = await byIds(ids: ids.toList(), cancelToken: cancelToken);
-      return posts.map((p) => p.copyWith(isFavorited: true)).toList();
-    } catch (e, st) {
-      debugPrint('Rule34 fav error: $e\n$st');
-      return [];
+    final response = await dio.get<String>(
+      'https://rule34.xxx/index.php',
+      queryParameters: {
+        'page': 'favorites',
+        's': 'view',
+        'id': userId,
+        'pid': pid,
+      },
+      options: Options(responseType: ResponseType.plain),
+      cancelToken: cancelToken,
+    );
+    final html = response.data ?? '';
+    final matches = RegExp(
+      r'id="p(\d+)"|page=post&(?:amp;)?s=view&(?:amp;)?id=(\d+)',
+    ).allMatches(html);
+    // Another user's favorites must not be recorded as our own.
+    final bool own = userId == rule34UserId;
+    final ids = <int>{};
+    for (final m in matches) {
+      final id = int.tryParse(m.group(1) ?? m.group(2) ?? '');
+      if (id == null) continue;
+      ids.add(id);
+      if (own) Rule34Post.markFavorited(id, true);
     }
+    if (ids.isEmpty) return [];
+    final posts = await byIds(ids: ids.toList(), cancelToken: cancelToken);
+    if (!own) return posts;
+    return posts.map((p) => p.copyWith(isFavorited: true)).toList();
   }
 }
