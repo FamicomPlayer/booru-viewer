@@ -170,6 +170,8 @@ class _FavoriteButtonState extends State<FavoriteButton> {
                   ],
                 ),
               );
+              // Dismissing the dialog is neither of its two answers.
+              if (proceed == null) return isLiked;
               if (proceed == true && context.mounted) {
                 await Navigator.of(context).push(
                   MaterialPageRoute(
@@ -190,7 +192,7 @@ class _FavoriteButtonState extends State<FavoriteButton> {
             final nowHasPassHash = refreshedIdentity.headers?['pass_hash'] != null ||
                 (refreshedCookie?.toLowerCase().contains('pass_hash=') ?? false);
             if (!nowHasPassHash) {
-              final newFav = true;
+              const newFav = true;
               Rule34Post.markFavorited(post.id, newFav, post: post, host: client.host);
               final updatedPost = post.copyWith(
                 isFavorited: newFav,
@@ -209,6 +211,7 @@ class _FavoriteButtonState extends State<FavoriteButton> {
         }
 
         final activeClient = context.mounted ? context.read<Client>() : client;
+        if (!mounted) return isLiked;
         setState(() => _loading = true);
         try {
           if (isLiked) {
@@ -231,10 +234,10 @@ class _FavoriteButtonState extends State<FavoriteButton> {
                 upvote: true,
                 replace: true,
               ));
-            } catch (_) {}
+            } on Object catch (_) {}
           }
           return newFav;
-        } catch (e) {
+        } on Object catch (e) {
           // If server call fails, fallback to local favorite so user doesn't lose it
           if (!isLiked) {
             Rule34Post.markFavorited(post.id, true, post: post, host: client.host);

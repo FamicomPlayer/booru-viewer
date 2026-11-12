@@ -46,6 +46,10 @@ class _PostDetailState extends State<PostDetail> {
     if (oldWidget.post.id != widget.post.id) {
       _currentPost = widget.post;
       _checkResolve();
+    } else if (oldWidget.post != widget.post) {
+      // Votes, favorites and edits arrive as a new post under the same id.
+      _currentPost = widget.post;
+      _checkResolve();
     }
   }
 
@@ -62,13 +66,13 @@ class _PostDetailState extends State<PostDetail> {
           _resolving = true;
           try {
             final resolved = await Rule34Post.resolveTagCategories(postToUse, client.dio);
-            if (mounted) {
+            if (mounted && resolved != _currentPost) {
               setState(() {
                 _currentPost = resolved;
               });
               client.posts.postCache.set(resolved);
             }
-          } catch (_) {} finally {
+          } on Object catch (_) {} finally {
             _resolving = false;
           }
         } else if (cached != null && cached != _currentPost) {
