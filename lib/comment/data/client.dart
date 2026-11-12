@@ -50,6 +50,8 @@ class CommentClient {
             });
 
       case BooruEngine.rule34:
+        // The API hands out every comment at once, whichever page is asked for.
+        if ((page ?? 1) > 1) return Future.value(const []);
         return dio
             .get(
               '/index.php',
@@ -154,6 +156,34 @@ class CommentClient {
     );
   }
 
+  static final RegExp _xmlEntity = RegExp(r'&(#[xX]?[0-9a-fA-F]+|[a-zA-Z]+);');
+
+  static const Map<String, String> _xmlEntities = {
+    'amp': '&',
+    'lt': '<',
+    'gt': '>',
+    'quot': '"',
+    'apos': "'",
+  };
+
+  /// Resolves the entities of an XML attribute value in a single pass.
+  static String _unescapeXml(String value) {
+    if (!value.contains('&')) return value;
+    return value.replaceAllMapped(_xmlEntity, (match) {
+      final String entity = match.group(1)!;
+      if (!entity.startsWith('#')) {
+        return _xmlEntities[entity] ?? match.group(0)!;
+      }
+      final bool hex = entity.length > 1 && (entity[1] == 'x' || entity[1] == 'X');
+      final int? code = int.tryParse(
+        entity.substring(hex ? 2 : 1),
+        radix: hex ? 16 : 10,
+      );
+      if (code == null || code > 0x10FFFF) return match.group(0)!;
+      return String.fromCharCode(code);
+    });
+  }
+
   static List<Comment> _parseRule34Comments(dynamic data, dynamic fallbackPostId) {
     if (data == null) return const [];
     if (data is List) {
@@ -178,8 +208,10 @@ class CommentClient {
       for (final match in matches) {
         final attrString = match.group(1) ?? '';
         String? getAttr(String name) {
-          final m = RegExp('$name="([^"]*)"').firstMatch(attrString);
-          return m?.group(1);
+          // Anchored, as `id` would otherwise be found inside `post_id`.
+          final m = RegExp('(?:^|\\s)$name="([^"]*)"').firstMatch(attrString);
+          final value = m?.group(1);
+          return value == null ? null : _unescapeXml(value);
         }
 
         final id = int.tryParse(getAttr('id') ?? '') ?? 0;

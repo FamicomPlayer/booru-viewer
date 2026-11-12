@@ -32,7 +32,7 @@ class _FavPageState extends State<FavPage> {
       final localPosts = await LocalFavorites.getLocalFavorites(client.host);
       if (localPosts.isEmpty) {
         scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('All local favorites are already in sync!')),
+          const SnackBar(content: Text('There are no local favorites to sync.')),
         );
         return;
       }
