@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:async/async.dart';
 import 'package:collection/collection.dart';
@@ -175,10 +176,12 @@ class FollowSync {
 
   Future<List<Follow>> _refreshSingles(List<Follow> singles) async {
     final engine = BooruEngine.fromHost(identity.host);
+    // A batch has to fit one page of the site, or the posts of some follows
+    // are cut off and the follows still count as refreshed.
     final int maxChunk = switch (engine) {
-      BooruEngine.derpibooru => 30,
+      BooruEngine.derpibooru => min(30, 50 ~/ refreshAmount),
       BooruEngine.rule34 => 15,
-      BooruEngine.e621 => 40,
+      BooruEngine.e621 => min(40, 320 ~/ refreshAmount),
     };
     List<Follow> follows = singles.take(maxChunk).toList();
     List<String> tags = follows.map((e) => e.tags).toList();
@@ -197,8 +200,11 @@ class FollowSync {
           );
           posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
           result.add(follow.withUnseen(posts));
-        } catch (e) {
-          result.add(follow.withTimestamp());
+        } on Object {
+          // A failed request must not pass for a follow without new posts.
+          // What was refreshed so far is kept, the failure returns next round.
+          if (result.isEmpty) rethrow;
+          break;
         }
       }
       return result;

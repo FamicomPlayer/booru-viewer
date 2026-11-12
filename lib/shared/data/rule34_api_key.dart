@@ -29,11 +29,13 @@ Future<String?> fetchRule34ApiKey({Identity? identity, Map<String, String>? head
       ),
     );
 
+    // Anything but the options page itself, such as a login redirect or a
+    // captcha, has no key to offer.
+    if (response.statusCode != HttpStatus.ok) return null;
     final html = response.data?.toString() ?? '';
     final keyMatch = RegExp(r'api_key=([a-zA-Z0-9_\-]+)').firstMatch(html) ??
         RegExp(r'name="api_key"[^>]*value="([^"]+)"', caseSensitive: false).firstMatch(html) ??
-        RegExp(r'API Key[:\s]+([a-zA-Z0-9_\-]+)', caseSensitive: false).firstMatch(html) ??
-        RegExp(r'value="([a-zA-Z0-9]{32,})"').firstMatch(html);
+        RegExp(r'API Key[:\s]+([a-zA-Z0-9_\-]+)', caseSensitive: false).firstMatch(html);
 
     if (keyMatch != null && keyMatch.group(1) != null && keyMatch.group(1)!.isNotEmpty) {
       return keyMatch.group(1);

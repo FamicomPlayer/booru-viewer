@@ -23,6 +23,37 @@ String encodeBasicAuth(String username, String password) =>
   );
 }
 
+/// Removes everything from [headers] that logs a user in.
+Map<String, String> withoutLoginHeaders(Map<String, String> headers) {
+  bool isSession(String name) =>
+      name == 'user_id' ||
+      name == 'pass_hash' ||
+      name == 'PHPSESSID' ||
+      name.contains('_session');
+
+  final Map<String, String> result = Map.of(headers)
+    ..remove(HttpHeaders.authorizationHeader)
+    ..remove('key')
+    ..remove('X-API-Key')
+    ..remove('user_id')
+    ..remove('api_key')
+    ..remove('pass_hash');
+
+  final String? cookie = result[HttpHeaders.cookieHeader];
+  if (cookie != null) {
+    final String kept = cookie
+        .split('; ')
+        .where((pair) => !isSession(pair.split('=').first.trim()))
+        .join('; ');
+    if (kept.isEmpty) {
+      result.remove(HttpHeaders.cookieHeader);
+    } else {
+      result[HttpHeaders.cookieHeader] = kept;
+    }
+  }
+  return result;
+}
+
 /// Returns a new URL which is guaranteed to
 /// - have a scheme (defaults to https)
 /// - not have a trailing slash
