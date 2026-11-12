@@ -306,7 +306,7 @@ class TasksController extends ChangeNotifier {
             try {
               currentPost = await Rule34Post.resolveTagCategories(currentPost, client.dio);
               client.posts.postCache.set(currentPost);
-            } catch (_) {}
+            } on Object catch (_) {}
           }
         }
 
@@ -330,7 +330,7 @@ class TasksController extends ChangeNotifier {
           }
         }
       }
-    } catch (_) {}
+    } on Object catch (_) {}
 
     await for (final response in cacheManager.getFileStream(
       url,

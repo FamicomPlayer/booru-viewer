@@ -201,8 +201,10 @@ extension PostVideoPlaying on Post {
         for (final MapEntry(:key, :value) in variants!.entries) {
           if (value == null) continue;
           if (!value.endsWith('mp4') && !value.endsWith('webm')) continue;
-          final dimensions = key.split('x').map(int.parse).toList();
-          final pixelSize = dimensions[0] * dimensions[1];
+          // Only variants named by their size can be weighed against the target.
+          final dimensions = key.split('x').map(int.tryParse).toList();
+          if (dimensions.length != 2 || dimensions.contains(null)) continue;
+          final pixelSize = dimensions[0]! * dimensions[1]!;
           final difference = (target.pixels - pixelSize).abs();
 
           if (closestDifference == null || difference < closestDifference) {

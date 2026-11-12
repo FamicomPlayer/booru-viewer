@@ -65,7 +65,7 @@ class CloudflareSolver {
           if (parsed.isNotEmpty && parsed != 'null') {
             userAgent = parsed;
           }
-        } catch (_) {}
+        } on Object catch (_) {}
 
         final activeContext = dialogContext ?? targetContext;
         if (activeContext.mounted) {
@@ -109,7 +109,7 @@ class CloudflareSolver {
         if (dialogContext != null && dialogContext!.mounted) {
           Navigator.of(dialogContext!).pop(true);
         }
-      } catch (e) {
+      } on Object catch (e) {
         debugPrint('CloudflareSolver clearance handling error: $e');
       }
     }
@@ -145,7 +145,7 @@ class CloudflareSolver {
         if (cookies.any((c) => c.name.toLowerCase() == 'cf_clearance')) {
           await onClearanceDetected(controller);
         }
-      } catch (_) {}
+      } on Object catch (_) {}
     });
 
     try {
@@ -237,7 +237,7 @@ class CloudflareSolver {
           completer.complete(result ?? false);
         }
       });
-    } catch (e) {
+    } on Object catch (e) {
       cleanup();
       if (!completer.isCompleted) {
         completer.complete(false);
