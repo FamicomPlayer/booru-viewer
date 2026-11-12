@@ -144,5 +144,5 @@ extension ClientExtension on Client {
     }
     return false;
   }
-  String withHost(String path) => identity.withHost(path);
+  String withHost(String path) => engine.webUrl(identity.host, path);
 }

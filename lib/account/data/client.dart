@@ -77,7 +77,6 @@ class AccountClient {
         id: identity.id,
         name: identity.username ?? engine.displayName,
         avatarId: null,
-        hasCroppedAvatar: false,
         blacklistedTags: traits.value.denylist.join('\n'),
         perPage: null,
       );

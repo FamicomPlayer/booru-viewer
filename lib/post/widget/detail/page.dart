@@ -43,7 +43,8 @@ class _PostDetailState extends State<PostDetail> {
   @override
   void didUpdateWidget(covariant PostDetail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.post.id != widget.post.id) {
+    // Votes, favorites and edits arrive as a new post under the same id.
+    if (oldWidget.post != widget.post) {
       _currentPost = widget.post;
       _checkResolve();
     }
@@ -62,13 +63,23 @@ class _PostDetailState extends State<PostDetail> {
           _resolving = true;
           try {
             final resolved = await Rule34Post.resolveTagCategories(postToUse, client.dio);
-            if (mounted) {
+            if (!mounted) return;
+            // Only the findings are taken over, the post itself may have
+            // changed while they were looked up.
+            final latest =
+                client.posts.postCache.get(widget.post.id) ?? _currentPost;
+            final merged = latest.copyWith(
+              tags: resolved.tags,
+              isFavorited:
+                  latest.isFavorited || Rule34Post.isFavorited(latest.id),
+            );
+            if (merged != _currentPost) {
               setState(() {
-                _currentPost = resolved;
+                _currentPost = merged;
               });
-              client.posts.postCache.set(resolved);
+              client.posts.postCache.set(merged);
             }
-          } catch (_) {} finally {
+          } on Object catch (_) {} finally {
             _resolving = false;
           }
         } else if (cached != null && cached != _currentPost) {

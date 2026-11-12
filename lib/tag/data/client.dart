@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
@@ -37,6 +39,8 @@ class TagClient {
     }
 
     if (engine == BooruEngine.rule34) {
+      // The autocomplete is all there is, and it has a single page.
+      if ((page ?? 1) > 1) return Future.value(const []);
       final term = query?['search[name_matches]']?.toString().replaceAll('*', '') ?? '';
       return autocomplete(search: term, limit: limit, cancelToken: cancelToken);
     }
@@ -105,7 +109,15 @@ class TagClient {
               cancelToken: cancelToken,
             )
             .then((r) {
-              final data = r.data;
+              Object? data = r.data;
+              // Served as text/html, which Dio leaves undecoded.
+              if (data is String) {
+                try {
+                  data = jsonDecode(data);
+                } on FormatException {
+                  return <Tag>[];
+                }
+              }
               if (data is! List) return <Tag>[];
               return data.map((item) {
                 final label = item['label']?.toString() ?? '';
@@ -157,7 +169,7 @@ class TagClient {
     QueryMap? query,
     CancelToken? cancelToken,
   }) {
-    if (engine != BooruEngine.e621) return Future.value(null);
+    if (engine != BooruEngine.e621) return Future.value();
     return dio
         .get(
           '/tag_aliases.json',
