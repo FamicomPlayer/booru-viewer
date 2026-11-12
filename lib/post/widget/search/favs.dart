@@ -32,7 +32,7 @@ class _FavPageState extends State<FavPage> {
       final localPosts = await LocalFavorites.getLocalFavorites(client.host);
       if (localPosts.isEmpty) {
         scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('All local favorites are already in sync!')),
+          const SnackBar(content: Text('There are no local favorites to sync.')),
         );
         return;
       }
@@ -47,7 +47,7 @@ class _FavPageState extends State<FavPage> {
         try {
           await client.posts.addFavorite(post.id);
           synced++;
-        } catch (_) {
+        } on Object catch (_) {
           failed++;
         }
       }
@@ -62,7 +62,7 @@ class _FavPageState extends State<FavPage> {
           duration: const Duration(seconds: 3),
         ),
       );
-    } catch (e) {
+    } on Object catch (e) {
       scaffoldMessenger.showSnackBar(
         SnackBar(content: Text('Sync error: $e')),
       );
@@ -227,6 +227,7 @@ class _FavPageState extends State<FavPage> {
                                     await idClient.replace(
                                       client.identity.copyWith(headers: newHeaders),
                                     );
+                                    if (!context.mounted) return;
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text('API Key retrieved! Loading favorites...'),
@@ -333,7 +334,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
         try {
           await client.posts.addFavorite(post.id);
           synced++;
-        } catch (_) {
+        } on Object catch (_) {
           failed++;
         }
       }
@@ -348,7 +349,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
           duration: const Duration(seconds: 3),
         ),
       );
-    } catch (e) {
+    } on Object catch (e) {
       scaffoldMessenger.showSnackBar(
         SnackBar(content: Text('Sync error: $e')),
       );

@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:collection/collection.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/logs/logs.dart';
@@ -49,7 +48,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       _initialized = true;
       final fallbackClient = context.read<Client>();
       
-      final titleStr = widget.title is Text ? (widget.title as Text).data ?? '' : '';
+      final titleStr = widget.title is Text ? (widget.title! as Text).data ?? '' : '';
       final isRule34 = widget.engine == BooruEngine.rule34 ||
           (widget.targetHost?.toLowerCase().contains('rule34') ?? false) ||
           (widget.initialUrl?.toLowerCase().contains('rule34') ?? false) ||
@@ -150,7 +149,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           Navigator.of(context).maybePop(true);
         }
       }
-    } catch (_) {}
+    } on Object catch (_) {}
   }
 
   Future<bool> _saveCookies({bool showToast = true}) async {
@@ -188,25 +187,6 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       // Query raw cookies from native CookieManager
       for (final domain in cookieDomains) {
         try {
-          final rawNative = await cookieManager.getCookieString(domain);
-          if (rawNative != null && rawNative.isNotEmpty) {
-            for (final part in rawNative.split(';')) {
-              final trimmed = part.trim();
-              final eqIdx = trimmed.indexOf('=');
-              if (eqIdx > 0) {
-                final k = trimmed.substring(0, eqIdx).trim();
-                final v = trimmed.substring(eqIdx + 1).trim();
-                if (k.isNotEmpty && v.isNotEmpty) {
-                  jar[k] = v;
-                  final kLower = k.toLowerCase();
-                  if (kLower == 'user_id' && v.isNotEmpty) foundUserId ??= v;
-                  if (kLower == 'pass_hash' && v.isNotEmpty) foundPassHash ??= v;
-                }
-              }
-            }
-          }
-        } catch (_) {}
-        try {
           final cList = await cookieManager.getCookies(domain);
           for (final c in cList) {
             allCookies.add(c);
@@ -219,7 +199,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
               foundPassHash = c.value;
             }
           }
-        } catch (_) {}
+        } on Object catch (_) {}
       }
 
       String? userAgent;
@@ -230,13 +210,13 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           if (ua.isNotEmpty && ua != 'null') {
             userAgent = ua;
           }
-        } catch (_) {}
+        } on Object catch (_) {}
       }
 
       // 2. JavaScript DOM and document.cookie extractor inside the WebView
       if (controller != null && _effectiveHost.contains('rule34')) {
         try {
-          const jsExtractor = '''
+          const jsExtractor = r'''
             (function() {
               var fav = document.querySelector('a[href*="favorites"][href*="id="]') ||
                         document.querySelector('a[href*="s=view&id="]');
@@ -251,7 +231,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                 if (m) uid = m[1];
               }
               if (!uid && text) {
-                var m2 = text.match(/user_id=([0-9]+)/i) || text.match(/User ID[:\\s]+([0-9]+)/i);
+                var m2 = text.match(/user_id=([0-9]+)/i) || text.match(/User ID[:\s]+([0-9]+)/i);
                 if (m2) uid = m2[1];
               }
               var uidInput = document.querySelector('input[name="user_id"]');
@@ -272,8 +252,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                              text.indexOf('My Favorites') !== -1 ||
                              text.indexOf('My Profile') !== -1;
                              
-              var keyMatch = text.match(/api_key=([a-zA-Z0-9_\\-]+)/i) || 
-                             text.match(/API Key[:\\s]+([a-zA-Z0-9_\\-]+)/i);
+              var keyMatch = text.match(/api_key=([a-zA-Z0-9_\-]+)/i) || 
+                             text.match(/API Key[:\s]+([a-zA-Z0-9_\-]+)/i);
               var apiKey = keyMatch ? keyMatch[1] : '';
               var keyInput = document.querySelector('input[name="api_key"]') || document.querySelector('input[name="pass_hash"]');
               if (keyInput && keyInput.value) apiKey = keyInput.value;
@@ -291,7 +271,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
               try {
                 final decoded = jsonDecode(rawStr);
                 if (decoded is String) rawStr = decoded;
-              } catch (_) {
+              } on Object catch (_) {
                 rawStr = rawStr.substring(1, rawStr.length - 1).replaceAll(r'\"', '"');
               }
             }
@@ -324,7 +304,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
               }
             }
           }
-        } catch (e) {
+        } on Object catch (e) {
           logger?.error('Error in JS extractor', null, e);
         }
       }
@@ -354,7 +334,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           if (fetchedKey != null && fetchedKey.isNotEmpty) {
             pageApiKey = fetchedKey;
           }
-        } catch (_) {}
+        } on Object catch (_) {}
       }
 
       if (pageApiKey != null && pageApiKey.isNotEmpty) {
@@ -368,9 +348,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
            currentUrl.contains('page=account&s=home') ||
            currentUrl.contains('page=account&s=options'));
 
-      final isGenericAuth = !_effectiveHost.contains('rule34') && jar.isNotEmpty;
-
-      if (isRule34Auth || isGenericAuth) {
+      if (isRule34Auth) {
         widget.onCookiesCaptured?.call(headers, allCookies);
 
         final newUsername = foundUsername ??
@@ -378,41 +356,36 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                 ? 'User #$foundUserId'
                 : 'Rule34 User');
 
-        final allIdentities = await idClient.all();
-        final r34Identities = allIdentities.where((i) => i.host.contains('rule34')).toList();
+        // Only one identity receives the login, others may be other accounts.
+        final Identity? target = idClient.identity.host.contains('rule34')
+            ? idClient.identity
+            : (await idClient.all())
+                .where((i) => i.host.contains('rule34'))
+                .firstOrNull;
 
-        // 1. Update EVERY rule34 identity with the captured auth headers
-        for (final id in r34Identities) {
-          final existingHeaders = Map<String, String>.from(id.headers ?? {});
-          existingHeaders.addAll(headers);
+        if (target != null) {
+          final merged = Map<String, String>.from(target.headers ?? {});
+          // An API key belongs to its user and must not outlive a change of account.
+          if (headers['user_id'] != null &&
+              merged['user_id'] != null &&
+              merged['user_id'] != headers['user_id'] &&
+              !headers.containsKey('api_key')) {
+            merged.remove('api_key');
+          }
+          merged.addAll(headers);
           await idClient.replace(
-            id.copyWith(
-              username: (id.username != null &&
-                      id.username!.isNotEmpty &&
-                      id.username != 'Anonymous')
-                  ? id.username
+            target.copyWith(
+              username: (target.username != null &&
+                      target.username!.isNotEmpty &&
+                      target.username != 'Anonymous')
+                  ? target.username
                   : newUsername,
-              headers: existingHeaders,
+              headers: merged,
             ),
           );
-        }
-
-        // 2. Ensure the active identity is a Rule34 identity with these headers
-        if (idClient.identity.host.contains('rule34')) {
-          final existingHeaders = Map<String, String>.from(idClient.identity.headers ?? {});
-          existingHeaders.addAll(headers);
-          await idClient.replace(
-            idClient.identity.copyWith(
-              username: (idClient.identity.username != null &&
-                      idClient.identity.username!.isNotEmpty &&
-                      idClient.identity.username != 'Anonymous')
-                  ? idClient.identity.username
-                  : newUsername,
-              headers: existingHeaders,
-            ),
-          );
-        } else if (r34Identities.isNotEmpty) {
-          await idClient.activate(r34Identities.first.id);
+          if (target.id != idClient.identity.id) {
+            await idClient.activate(target.id);
+          }
         } else {
           final created = await idClient.add(
             IdentityRequest(
@@ -433,20 +406,33 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
           );
         }
         return true;
-      } else {
-        if (showToast && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'No login session found yet. Please enter your username and password into the login form below and click Log In first.',
-              ),
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-        return false;
       }
-    } catch (e, stacktrace) {
+
+      // Without a login this page resolves Cloudflare challenges, of which
+      // only the clearance is kept, on the identity that is in use.
+      final cleared = withCloudflareCookies(idClient.identity.headers, jar);
+      if (cleared != null) {
+        // The clearance only holds for the browser that earned it.
+        if (userAgent != null) {
+          cleared[HttpHeaders.userAgentHeader] = userAgent;
+        }
+        await idClient.replace(idClient.identity.copyWith(headers: cleared));
+        return true;
+      }
+
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _effectiveHost.contains('rule34')
+                  ? 'No login session found yet. Please enter your username and password into the login form below and click Log In first.'
+                  : 'Nothing to save yet. Please complete the check shown on the page first.',
+            ),
+          ),
+        );
+      }
+      return false;
+    } on Object catch (e, stacktrace) {
       logger?.error('Failed to capture cookies', null, e, stacktrace);
       if (showToast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -527,8 +513,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                   onPressed: _saving
                       ? null
                       : () async {
-                          final ok = await _saveCookies(showToast: true);
-                          if (ok && mounted) {
+                          final ok = await _saveCookies();
+                          if (ok && context.mounted) {
                             Navigator.of(context).maybePop(true);
                           }
                         },
@@ -580,8 +566,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
         onPressed: _saving
             ? null
             : () async {
-                final ok = await _saveCookies(showToast: true);
-                if (ok && mounted) {
+                final ok = await _saveCookies();
+                if (ok && context.mounted) {
                   Navigator.of(context).maybePop(true);
                 }
               },
@@ -602,6 +588,33 @@ Future<void> dropCloudflareCookies(IdentityClient client) async {
   await client.replace(client.identity.copyWith(headers: headers));
 }
 
+/// Adds the Cloudflare cookies among [cookies] to those of [headers], or null
+/// when there are none to add.
+Map<String, String>? withCloudflareCookies(
+  Map<String, String>? headers,
+  Map<String, String> cookies,
+) {
+  Map<String, String> jar = {};
+  for (final pair in (headers?[HttpHeaders.cookieHeader] ?? '').split('; ')) {
+    int split = pair.indexOf('=');
+    if (split <= 0) continue;
+    jar[pair.substring(0, split)] = pair.substring(split + 1);
+  }
+  bool found = false;
+  for (final MapEntry(:key, :value) in cookies.entries) {
+    if (!isCloudflareCookie(key)) continue;
+    jar[key] = value;
+    found = true;
+  }
+  if (!found) return null;
+  return {
+    ...?headers,
+    HttpHeaders.cookieHeader: jar.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; '),
+  };
+}
+
 /// Strips Cloudflare cookies from [headers], or null when nothing changes.
 Map<String, String>? withoutCloudflareCookies(Map<String, String>? headers) {
   String? existing = headers?[HttpHeaders.cookieHeader];
@@ -612,11 +625,11 @@ Map<String, String>? withoutCloudflareCookies(Map<String, String>? headers) {
       .where((pair) => !isCloudflareCookie(pair.split('=').first))
       .toList();
   if (kept.length == pairs.length) return null;
-  return Map.fromEntries(
-    headers!.entries.map(
-      (entry) => entry.key == HttpHeaders.cookieHeader
-          ? MapEntry(entry.key, kept.join('; '))
-          : entry,
-    ),
-  );
+  return {
+    for (final MapEntry(:key, :value) in headers!.entries)
+      if (key != HttpHeaders.cookieHeader)
+        key: value
+      else if (kept.isNotEmpty)
+        key: kept.join('; '),
+  };
 }
