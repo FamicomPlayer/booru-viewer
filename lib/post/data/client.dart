@@ -84,7 +84,7 @@ class PostClient {
         ? username.substring(6).trim()
         : username;
     return identity?.headers?['user_id'] ??
-        _extractUserId(identity?.headers?[HttpHeaders.cookieHeader]) ??
+        identity?.cookies['user_id'] ??
         (name != null && int.tryParse(name) != null ? name : null);
   }
 
@@ -470,61 +470,35 @@ class PostClient {
   Future<void> addFavorite(int postId) async {
     switch (engine) {
       case BooruEngine.rule34:
-        final rawCookie = identity?.headers?[HttpHeaders.cookieHeader] ??
-            identity?.headers?['Cookie'] ??
-            identity?.headers?['cookie'];
-        final currentUserId = identity?.headers?['user_id'] ??
-            _extractUserId(rawCookie);
-        final currentPassHash = identity?.headers?['pass_hash'] ??
-            _extractPassHash(rawCookie);
-
-        if (currentUserId == null || currentPassHash == null) {
-          throw Exception('Web login required to favorite on Rule34');
+        final session = identity?.rule34Session;
+        if (session == null) {
+          throw const WebLoginException(
+            'Log in through Web Login to favorite on Rule34.',
+          );
         }
-
-        final cookieMap = <String, String>{};
-        if (rawCookie != null && rawCookie.isNotEmpty) {
-          for (final part in rawCookie.split(';')) {
-            final trimmed = part.trim();
-            final eq = trimmed.indexOf('=');
-            if (eq > 0) {
-              cookieMap[trimmed.substring(0, eq).trim()] =
-                  trimmed.substring(eq + 1).trim();
-            }
-          }
-        }
-        cookieMap['user_id'] = currentUserId;
-        cookieMap['pass_hash'] = currentPassHash;
-
-        final fullCookieStr = cookieMap.entries
-            .map((e) => '${e.key}=${e.value}')
-            .join('; ');
-
-        final userAgent = identity?.headers?[HttpHeaders.userAgentHeader] ??
-            identity?.headers?['user_agent'] ??
-            dio.options.headers[HttpHeaders.userAgentHeader];
-        final referer = 'https://rule34.xxx/index.php?page=post&s=view&id=$postId';
-
-        final response = await dio.get(
+        final response = await dio.get<String>(
           'https://rule34.xxx/public/addfav.php',
           queryParameters: {'id': postId},
           options: Options(
             responseType: ResponseType.plain,
-            headers: {
-              if (userAgent != null) HttpHeaders.userAgentHeader: userAgent,
-              HttpHeaders.cookieHeader: fullCookieStr,
-              'Cookie': fullCookieStr,
-              HttpHeaders.refererHeader: referer,
-              'Referer': referer,
-            },
+            headers: _rule34SiteHeaders(session, postId),
           ),
         );
-
-        // The site answers 1 for an existing favorite, 2 without a session and
-        // anything else once the favorite was added.
-        final body = response.data?.toString().trim() ?? '';
-        if (body == '2') {
-          throw Exception('Failed to favorite on Rule34: session rejected');
+        // The site answers 3 for a favorite it added, 1 for one it already
+        // had and 2 without a session. Anything else is not its answer, but
+        // that of a check or an error page in front of it.
+        switch (response.data?.trim()) {
+          case '1' || '3':
+            break;
+          case '2':
+            throw const WebLoginException(
+              'Rule34 no longer takes the stored login. '
+              'Log in through Web Login again.',
+            );
+          default:
+            throw const WebLoginException(
+              'Rule34 did not confirm the favorite.',
+            );
         }
         Rule34Post.markFavorited(postId, true);
       case BooruEngine.derpibooru:
@@ -543,60 +517,37 @@ class PostClient {
   Future<void> removeFavorite(int postId) async {
     switch (engine) {
       case BooruEngine.rule34:
-        final rawCookie = identity?.headers?[HttpHeaders.cookieHeader] ??
-            identity?.headers?['Cookie'] ??
-            identity?.headers?['cookie'];
-        final currentUserId = identity?.headers?['user_id'] ??
-            _extractUserId(rawCookie);
-        final currentPassHash = identity?.headers?['pass_hash'] ??
-            _extractPassHash(rawCookie);
-
-        // Without a session the favorite can only be one kept on this device.
-        if (currentUserId == null || currentPassHash == null) {
-          Rule34Post.markFavorited(postId, false);
+        final String host = identity!.host;
+        final session = identity!.rule34Session;
+        if (session == null) {
+          // Without a session only a favorite kept on this device can go,
+          // one on the site would be back with the next look at it.
+          if (!LocalFavorites.isFavorited(host, postId)) {
+            throw const WebLoginException(
+              'Log in through Web Login to remove favorites on Rule34.',
+            );
+          }
+          Rule34Post.markFavorited(postId, false, host: host);
           return;
         }
-
-        final cookieMap = <String, String>{};
-        if (rawCookie != null && rawCookie.isNotEmpty) {
-          for (final part in rawCookie.split(';')) {
-            final trimmed = part.trim();
-            final eq = trimmed.indexOf('=');
-            if (eq > 0) {
-              cookieMap[trimmed.substring(0, eq).trim()] =
-                  trimmed.substring(eq + 1).trim();
-            }
-          }
-        }
-        cookieMap['user_id'] = currentUserId;
-        cookieMap['pass_hash'] = currentPassHash;
-
-        final fullCookieStr = cookieMap.entries
-            .map((e) => '${e.key}=${e.value}')
-            .join('; ');
-
-        final userAgent = identity?.headers?[HttpHeaders.userAgentHeader] ??
-            identity?.headers?['user_agent'] ??
-            dio.options.headers[HttpHeaders.userAgentHeader];
-        final referer = 'https://rule34.xxx/index.php?page=post&s=view&id=$postId';
-
-        await dio.get(
+        final response = await dio.get<String>(
           'https://rule34.xxx/index.php',
           queryParameters: {'page': 'favorites', 's': 'delete', 'id': postId},
           options: Options(
-            headers: {
-              if (userAgent != null) HttpHeaders.userAgentHeader: userAgent,
-              if (fullCookieStr.isNotEmpty) ...{
-                HttpHeaders.cookieHeader: fullCookieStr,
-                'Cookie': fullCookieStr,
-              },
-              HttpHeaders.refererHeader: referer,
-              'Referer': referer,
-            },
+            responseType: ResponseType.plain,
+            headers: _rule34SiteHeaders(session, postId),
             validateStatus: (status) => status == 200 || status == 302,
           ),
         );
-        Rule34Post.markFavorited(postId, false);
+        // Shown its login form, the site did not take the session.
+        final Map<String, String> landed = response.realUri.queryParameters;
+        if (landed['page'] == 'account' && landed['s'] == 'login') {
+          throw const WebLoginException(
+            'Rule34 no longer takes the stored login. '
+            'Log in through Web Login again.',
+          );
+        }
+        Rule34Post.markFavorited(postId, false, host: host);
       case BooruEngine.derpibooru:
         final String host = identity!.host;
         // A favorite that never left this device needs no word from the site.
@@ -613,18 +564,26 @@ class PostClient {
     }
   }
 
-  static String? _extractUserId(String? cookieHeader) {
-    if (cookieHeader == null || cookieHeader.isEmpty) return null;
-    final match = RegExp(r'(?:^|;\s*)user_id=([^;\s]+)', caseSensitive: false).firstMatch(cookieHeader);
-    return match?.group(1)?.replaceAll('"', '').trim();
+  /// What the website of Rule34 is sent with a favorite: the login of a
+  /// browser, and the page that a browser would send it from.
+  Map<String, String> _rule34SiteHeaders(
+    ({String userId, String passHash}) session,
+    int postId,
+  ) {
+    final String? userAgent =
+        identity?.headers?[HttpHeaders.userAgentHeader] ??
+        identity?.headers?['user_agent'];
+    return {
+      HttpHeaders.userAgentHeader: ?userAgent,
+      HttpHeaders.cookieHeader: formatCookies({
+        ...?identity?.cookies,
+        'user_id': session.userId,
+        'pass_hash': session.passHash,
+      }),
+      HttpHeaders.refererHeader:
+          'https://rule34.xxx/index.php?page=post&s=view&id=$postId',
+    };
   }
-
-  static String? _extractPassHash(String? cookieHeader) {
-    if (cookieHeader == null || cookieHeader.isEmpty) return null;
-    final match = RegExp(r'(?:^|;\s*)pass_hash=([^;\s]+)', caseSensitive: false).firstMatch(cookieHeader);
-    return match?.group(1)?.replaceAll('"', '').trim();
-  }
-
   Future<List<Post>> _rule34Favorites({
     required String userId,
     int? page,
