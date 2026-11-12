@@ -30,17 +30,71 @@ class TagFolderRule {
   /// match, `-` turns one around, and `rating:safe` and the like are
   /// understood. An entry also matches as the whole name of a tag, which is
   /// how sites that keep spaces in their tag names are written.
-  bool matches(Post post) => tags.any(
-    (entry) => post.hasTag(entry) || post.isDeniedBy([entry]),
-  );
+  bool matches(Post post) => specificity(post) != null;
 
-  /// The folder of the first of [rules] that [post] matches, if any.
-  static String? folderFor(Post post, List<TagFolderRule> rules) {
-    for (final rule in rules) {
-      if (rule.folder.isEmpty) continue;
-      if (rule.matches(post)) return rule.folder;
+  /// How many tags the most demanding entry that [post] matches asks for, or
+  /// null where it matches none.
+  int? specificity(Post post) {
+    int? result;
+    for (final String entry in tags) {
+      final int? terms = post.hasTag(entry)
+          ? 1
+          : post.isDeniedBy([entry])
+          ? _demands(entry)
+          : null;
+      if (terms != null && terms > (result ?? 0)) result = terms;
     }
-    return null;
+    return result;
+  }
+
+  static final RegExp _optional = RegExp(r'^-*~');
+
+  /// How many tags [entry] asks of a post. Those marked with `~` are
+  /// alternatives, of which one is enough.
+  static int _demands(String entry) {
+    final Iterable<String> terms = entry
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty);
+    final int alternatives = terms.where(_optional.hasMatch).length;
+    return terms.length - alternatives + (alternatives > 0 ? 1 : 0);
+  }
+
+  static final RegExp _separator = RegExp(r'[\\/]');
+  static final RegExp _invalid = RegExp(r'[:*?"<>|\x00-\x1f]');
+
+  /// [folder] as the folders it names below the downloads, with what a
+  /// filesystem does not take as a name left out.
+  static List<String> segmentsOf(String folder) => folder
+      .split(_separator)
+      .map(
+        (e) => e
+            .replaceAll(_invalid, '_')
+            .trim()
+            // Windows drops dots from the end of a name, and `..` leads out.
+            .replaceFirst(RegExp(r'[. ]+$'), ''),
+      )
+      .where((e) => e.isNotEmpty)
+      .toList();
+
+  /// The folder that [post] is downloaded into, if any of [rules] names one.
+  ///
+  /// Of the rules that match, the one that asks for the most tags decides,
+  /// so that `female big_butt` is not lost to a rule for `female` alone.
+  /// Among rules that ask for as much, the first one does.
+  static String? folderFor(Post post, List<TagFolderRule> rules) {
+    String? result;
+    int best = 0;
+    for (final rule in rules) {
+      final String folder = segmentsOf(rule.folder).join('/');
+      if (folder.isEmpty) continue;
+      final int? specificity = rule.specificity(post);
+      if (specificity != null && specificity > best) {
+        best = specificity;
+        result = folder;
+      }
+    }
+    return result;
   }
 
   static List<TagFolderRule> decodeList(String? raw) {

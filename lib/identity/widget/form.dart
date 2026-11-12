@@ -163,23 +163,34 @@ class _AccountFormState extends State<AccountForm> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (engine == BooruEngine.rule34) ...[
+            if (engine != BooruEngine.e621) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 4, bottom: 8),
                 child: FilledButton.tonalIcon(
                   icon: const Icon(Icons.login),
                   label: const Text('Web Login (Required for Favorites)'),
                   onPressed: () async {
-                    final targetHost = hostController.text.trim().isNotEmpty
-                        ? hostController.text.trim()
-                        : 'https://rule34.xxx';
+                    final bool isRule34 = engine == BooruEngine.rule34;
+                    final String host = hostController.text.trim();
                     final bool? captured = await Navigator.of(context).push<bool>(
                       MaterialPageRoute(
                         builder: (context) => CookieCapturePage(
-                          title: const Text('Rule34 Web Login'),
-                          initialUrl: 'https://rule34.xxx/index.php?page=account&s=home',
-                          targetHost: targetHost,
-                          engine: BooruEngine.rule34,
+                          title: Text(
+                            isRule34
+                                ? 'Rule34 Web Login'
+                                : '${engine.displayName} Web Login',
+                          ),
+                          // A page that only a login gets to see, which is
+                          // captured at once where there already is one.
+                          initialUrl: isRule34
+                              ? 'https://rule34.xxx/index.php?page=account&s=home'
+                              : '${normalizeHostUrl(host)}/sessions/new',
+                          targetHost: isRule34 && host.isEmpty
+                              ? 'https://rule34.xxx'
+                              : host,
+                          engine: engine,
+                          identity: widget.identity?.id,
+                          newAccount: !isEditing,
                           onCookiesCaptured: (headers, cookies) {
                             _capturedHeaders = Map.of(headers);
                             final uid = headers['user_id'];
@@ -195,14 +206,21 @@ class _AccountFormState extends State<AccountForm> {
                       ),
                     );
                     if (context.mounted) {
-                      final idClient = context.read<IdentityClient>();
-                      final uid = _capturedHeaders?['user_id'] ?? idClient.identity.headers?['user_id'];
-                      if (uid != null && uid.isNotEmpty && usernameController.text.isEmpty) {
-                        usernameController.text = uid;
-                      }
-                      final apiKey = _capturedHeaders?['api_key'] ?? idClient.identity.headers?['api_key'];
-                      if (apiKey != null && apiKey.isNotEmpty && apikeyController.text.isEmpty) {
-                        apikeyController.text = apiKey;
+                      // Only Rule34 hands its credentials out with the login.
+                      if (isRule34) {
+                        // A login that was captured is the identity in use
+                        // by now. Without one, that is some other account.
+                        final Identity? saved = captured == true
+                            ? context.read<IdentityClient>().identity
+                            : null;
+                        final uid = _capturedHeaders?['user_id'] ?? saved?.headers?['user_id'];
+                        if (uid != null && uid.isNotEmpty && usernameController.text.isEmpty) {
+                          usernameController.text = uid;
+                        }
+                        final apiKey = _capturedHeaders?['api_key'] ?? saved?.headers?['api_key'];
+                        if (apiKey != null && apiKey.isNotEmpty && apikeyController.text.isEmpty) {
+                          apikeyController.text = apiKey;
+                        }
                       }
                       setState(() {});
                       if (captured == true) {

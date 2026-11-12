@@ -19,6 +19,71 @@ class FavPage extends StatefulWidget {
   State<FavPage> createState() => _FavPageState();
 }
 
+/// Hands the favorites kept on this device to the account on the site of
+/// [client]. Favorites the site already has are left as they are, so this
+/// may be run again at any time.
+Future<void> syncLocalFavorites(
+  Client client,
+  ScaffoldMessengerState messenger,
+) async {
+  final String site = client.engine.displayName;
+  try {
+    if (!client.identity.hasWebLogin) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Log in through Web Login to sync with $site.'),
+        ),
+      );
+      return;
+    }
+    final localPosts = await LocalFavorites.getLocalFavorites(client.host);
+    if (localPosts.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('There are no local favorites to sync.')),
+      );
+      return;
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Syncing ${localPosts.length} local favorites to $site...',
+        ),
+      ),
+    );
+
+    int synced = 0;
+    int failed = 0;
+    for (final post in localPosts) {
+      try {
+        await client.posts.addFavorite(post.id);
+        synced++;
+      } on WebLoginException catch (e) {
+        // A login the site does not take fails every favorite alike.
+        messenger.showSnackBar(
+          SnackBar(content: Text('Synced $synced favorites, then stopped: $e')),
+        );
+        return;
+      } on Object {
+        failed++;
+      }
+    }
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failed == 0
+              ? 'Successfully synced $synced favorites to your $site account!'
+              : 'Synced $synced favorites to $site ($failed failed).',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  } on Object catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Sync error: $e')));
+  }
+}
+
 class _FavPageState extends State<FavPage> {
   bool _showLocalFavorites = false;
   bool _syncing = false;
@@ -26,45 +91,10 @@ class _FavPageState extends State<FavPage> {
   Future<void> _syncLocalFavorites(BuildContext context) async {
     if (_syncing) return;
     setState(() => _syncing = true);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
-      final client = context.read<Client>();
-      final localPosts = await LocalFavorites.getLocalFavorites(client.host);
-      if (localPosts.isEmpty) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('There are no local favorites to sync.')),
-        );
-        return;
-      }
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('Syncing ${localPosts.length} local favorites to Rule34.xxx...')),
-      );
-
-      int synced = 0;
-      int failed = 0;
-      for (final post in localPosts) {
-        try {
-          await client.posts.addFavorite(post.id);
-          synced++;
-        } on Object catch (_) {
-          failed++;
-        }
-      }
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            failed == 0
-                ? 'Successfully synced $synced favorites to your Rule34.xxx account!'
-                : 'Synced $synced favorites ($failed failed).',
-          ),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    } on Object catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('Sync error: $e')),
+      await syncLocalFavorites(
+        context.read<Client>(),
+        ScaffoldMessenger.of(context),
       );
     } finally {
       if (mounted) setState(() => _syncing = false);
@@ -95,7 +125,15 @@ class _FavPageState extends State<FavPage> {
     }
 
     final bool isRule34 = client.engine == BooruEngine.rule34;
-    final bool hasServerLogin = client.hasLogin && (!isRule34 || userId != null);
+    // Derpibooru only lists favorites for its API key, a web login alone
+    // does not get to read them.
+    final String? derpibooruKey =
+        client.identity.headers?['key'] ?? client.identity.headers?['X-API-Key'];
+    final bool hasServerLogin =
+        client.hasLogin &&
+        (!isRule34 || userId != null) &&
+        (client.engine != BooruEngine.derpibooru ||
+            (derpibooruKey?.isNotEmpty ?? false));
     final String? apiKey = client.identity.headers?['api_key'];
     final bool hasApiKey = apiKey != null && apiKey.isNotEmpty;
 
@@ -108,7 +146,6 @@ class _FavPageState extends State<FavPage> {
     if (_showLocalFavorites || !hasServerLogin) {
       return RouterDrawerEntry<FavPage>(
         child: LocalFavoritesView(
-          isRule34: isRule34,
           hasServerLogin: hasServerLogin,
           onSwitchToOnline: hasServerLogin
               ? () => setState(() => _showLocalFavorites = false)
@@ -133,7 +170,7 @@ class _FavPageState extends State<FavPage> {
                   appBar: PostSelectionAppBar(
                     child: PostPageAppBar(
                       actions: [
-                        if (client.hasLogin && isRule34)
+                        if (client.identity.hasWebLogin)
                           IconButton(
                             icon: _syncing
                                 ? const SizedBox(
@@ -142,7 +179,7 @@ class _FavPageState extends State<FavPage> {
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
                                 : const Icon(Icons.sync),
-                            tooltip: 'Sync Favorites with Rule34',
+                            tooltip: 'Sync Favorites with ${client.engine.displayName}',
                             onPressed: _syncing ? null : () => _syncLocalFavorites(context),
                           ),
                         IconButton(
@@ -162,11 +199,11 @@ class _FavPageState extends State<FavPage> {
                         const FavoriteOrderSwitch(),
                         const Divider(),
                       ],
-                      if (client.hasLogin && isRule34) ...[
+                      if (client.identity.hasWebLogin) ...[
                         ListTile(
                           leading: const Icon(Icons.sync),
                           title: const Text('Sync Favorites'),
-                          subtitle: const Text('Upload local favorites to Rule34'),
+                          subtitle: Text('Upload local favorites to ${client.engine.displayName}'),
                           onTap: () {
                             Navigator.of(context).pop();
                             _syncLocalFavorites(context);
@@ -279,12 +316,10 @@ class _FavPageState extends State<FavPage> {
 class LocalFavoritesView extends StatefulWidget {
   const LocalFavoritesView({
     super.key,
-    required this.isRule34,
     required this.hasServerLogin,
     this.onSwitchToOnline,
   });
 
-  final bool isRule34;
   final bool hasServerLogin;
   final VoidCallback? onSwitchToOnline;
 
@@ -314,45 +349,16 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
     }
   }
 
-  Future<void> _syncWithRule34() async {
+  Future<void> _sync() async {
     if (_syncing) return;
     setState(() => _syncing = true);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
-      final client = context.read<Client>();
-      final localPosts = await LocalFavorites.getLocalFavorites(client.host);
-      if (localPosts.isEmpty) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('No local favorites to sync.')),
-        );
-        return;
-      }
-
-      int synced = 0;
-      int failed = 0;
-      for (final post in localPosts) {
-        try {
-          await client.posts.addFavorite(post.id);
-          synced++;
-        } on Object catch (_) {
-          failed++;
-        }
-      }
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            failed == 0
-                ? 'Successfully synced $synced favorites to your Rule34 account!'
-                : 'Synced $synced favorites to Rule34 ($failed failed).',
-          ),
-          duration: const Duration(seconds: 3),
-        ),
+      await syncLocalFavorites(
+        context.read<Client>(),
+        ScaffoldMessenger.of(context),
       );
-    } on Object catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('Sync error: $e')),
-      );
+      // The device may hold fewer of them now, and the page may be gone.
+      if (mounted) await _load();
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
@@ -360,12 +366,17 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
 
   @override
   Widget build(BuildContext context) {
+    final client = context.watch<Client>();
+    final String site = client.engine.displayName;
+    final bool needsWebLogin = client.identity.needsWebLogin;
+    final bool hasWebLogin = client.identity.hasWebLogin;
     return AdaptiveScaffold(
       appBar: DefaultAppBar(
         title: const Text('Local Favorites'),
         actions: [
-          if (widget.hasServerLogin) ...[
-            IconButton(
+          if (widget.hasServerLogin || hasWebLogin) ...[
+            if (hasWebLogin)
+              IconButton(
               icon: _syncing
                   ? const SizedBox(
                       width: 18,
@@ -373,8 +384,8 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.sync),
-              tooltip: 'Sync Favorites with Rule34',
-              onPressed: _syncing ? null : _syncWithRule34,
+              tooltip: 'Sync Favorites with $site',
+              onPressed: _syncing ? null : _sync,
             ),
             if (widget.onSwitchToOnline != null)
               TextButton.icon(
@@ -395,7 +406,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
       drawer: const RouterDrawer(),
       body: Column(
         children: [
-          if (widget.isRule34 && !widget.hasServerLogin)
+          if (needsWebLogin && !hasWebLogin)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: Theme.of(context).colorScheme.primaryContainer,
@@ -408,7 +419,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Log in to sync favorites with Rule34.xxx server',
+                      'Log in to sync favorites with your $site account',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -421,12 +432,11 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                     onPressed: () async {
                       final loggedIn = await Navigator.of(context).push<bool>(
                         MaterialPageRoute(
-                          builder: (context) => const CookieCapturePage(
-                            title: Text('Rule34 Web Login'),
-                            initialUrl: 'https://rule34.xxx/index.php?page=account&s=login',
-                            targetHost: 'https://rule34.xxx',
-                            engine: BooruEngine.rule34,
-                          ),
+                          builder: (context) =>
+                              CookieCapturePage.login(
+                                host: client.host,
+                                identity: client.identity.id,
+                              ),
                         ),
                       );
                       if (loggedIn == true && mounted) {
@@ -438,7 +448,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                 ],
               ),
             ),
-          if (widget.isRule34 && widget.hasServerLogin)
+          if (needsWebLogin && hasWebLogin)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: Theme.of(context).colorScheme.secondaryContainer,
@@ -451,7 +461,10 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Rule34 account connected. Tap Sync to upload your local favorites to the server.',
+                      client.engine == BooruEngine.derpibooru &&
+                              !client.identity.hasDerpibooruKey
+                          ? '$site account connected. Favorites made here are sent to the site. Add your API key to this account to browse the ones made elsewhere.'
+                          : '$site account connected. Tap Sync to upload your local favorites to the server.',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -461,7 +474,7 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton.tonalIcon(
-                    onPressed: _syncing ? null : _syncWithRule34,
+                    onPressed: _syncing ? null : _sync,
                     icon: _syncing
                         ? const SizedBox(
                             width: 16,
@@ -481,8 +494,8 @@ class _LocalFavoritesViewState extends State<LocalFavoritesView> {
                     ? IconMessage(
                         icon: const Icon(Icons.favorite_border, size: 64),
                         title: Text(
-                          widget.isRule34
-                              ? 'No local favorites yet\nTap the heart icon on any post to save it locally, or switch to Online to browse your Rule34 favorites.'
+                          needsWebLogin
+                              ? 'No local favorites yet\nTap the heart icon on any post to save it locally, or switch to Online to browse your $site favorites.'
                               : 'No local favorites yet\nTap the heart icon on any post to add it to favorites.',
                           textAlign: TextAlign.center,
                         ),
