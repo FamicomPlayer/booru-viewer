@@ -155,6 +155,34 @@ void main() {
       expect(cdn.headers, isNot(contains('key')));
     });
 
+    test('keeps a Derpibooru login on the site and its key on the API', () async {
+      final dio = fakeDio(
+        adapter,
+        const Identity(
+          id: 1,
+          host: 'https://derpibooru.org',
+          username: 'tester',
+          headers: {
+            'key': 'k3y',
+            'X-API-Key': 'k3y',
+            HttpHeaders.cookieHeader: '_philomena_key=s3ssion',
+          },
+        ),
+      );
+
+      await dio.get('/images/1');
+      await dio.get('https://derpicdn.net/img/view/2026/1/1/1.png');
+
+      final site = adapter.requests.first;
+      expect(site.uri.queryParameters, isEmpty);
+      expect(site.headers, isNot(contains('X-API-Key')));
+      expect(site.headers[HttpHeaders.cookieHeader], '_philomena_key=s3ssion');
+
+      final cdn = adapter.requests.last;
+      expect(cdn.headers, isNot(contains(HttpHeaders.cookieHeader)));
+      expect(cdn.headers, isNot(contains('X-API-Key')));
+    });
+
     test('keeps a Rule34 key on its own host', () async {
       final dio = fakeDio(
         adapter,
