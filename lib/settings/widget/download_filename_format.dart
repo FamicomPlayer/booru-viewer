@@ -69,7 +69,7 @@ class _DownloadFileNameFormatPageState
     super.dispose();
   }
 
-  void _save(String value) {
+  set _format(String value) {
     context.read<Settings>().downloadFileNameFormat.value = value;
   }
 
@@ -90,7 +90,7 @@ class _DownloadFileNameFormatPageState
             onPressed: () {
               setState(() {
                 _controller.text = DownloadFileNameGenerator.defaultFormat;
-                _save(_controller.text);
+                _format = _controller.text;
               });
             },
           ),
@@ -132,7 +132,7 @@ class _DownloadFileNameFormatPageState
             ),
             onChanged: (val) {
               setState(() {});
-              _save(val);
+              _format = val;
             },
           ),
           const SizedBox(height: 24),
@@ -152,7 +152,7 @@ class _DownloadFileNameFormatPageState
                 onSelected: (_) {
                   setState(() {
                     _controller.text = preset.format;
-                    _save(preset.format);
+                    _format = preset.format;
                   });
                 },
               );
@@ -177,7 +177,7 @@ class _DownloadFileNameFormatPageState
                       ? text.replaceRange(selection.start, selection.end, token)
                       : '$text $token';
                   _controller.text = newText;
-                  _save(newText);
+                  _format = newText;
                   setState(() {});
                 },
               );

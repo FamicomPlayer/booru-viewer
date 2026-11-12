@@ -1,3 +1,5 @@
+import 'package:e1547/identity/identity.dart';
+
 enum BooruEngine {
   e621,
   derpibooru,
@@ -27,6 +29,26 @@ enum BooruEngine {
     BooruEngine.derpibooru => 'https://derpibooru.org',
     BooruEngine.rule34 => 'https://api.rule34.xxx',
   };
+
+  static final RegExp _postPath = RegExp(r'^/posts/(\d+)$');
+
+  /// Turns the app's own [path] into what the website of [host] shows for it.
+  String webUrl(String host, String path) {
+    final String? postId = _postPath.firstMatch(path)?.group(1);
+    if (postId != null) {
+      switch (this) {
+        case BooruEngine.derpibooru:
+          return assembleHostedUrl(host, '/images/$postId');
+        case BooruEngine.rule34:
+          // The API host serves no pages.
+          final String site = normalizeHostUrl(host).replaceFirst('://api.', '://');
+          return '$site/index.php?page=post&s=view&id=$postId';
+        case BooruEngine.e621:
+          break;
+      }
+    }
+    return assembleHostedUrl(host, path);
+  }
 }
 
 class Rule34Credentials {
