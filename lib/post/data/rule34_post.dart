@@ -78,6 +78,17 @@ abstract final class Rule34Post {
     _tagCategoryCache.clear();
     _favoritedPostIds.clear();
     _scrapedPostIds.clear();
+    _account = null;
+  }
+
+  static Object? _account;
+
+  /// Names the account whose favorites are remembered. Those seen on the
+  /// site for another one are forgotten, they are not this one's.
+  static void useAccount(Object? account) {
+    if (account == _account) return;
+    _account = account;
+    _favoritedPostIds.clear();
   }
 
   static void markFavorited(int id, bool fav, {Post? post, String host = 'rule34.xxx'}) {

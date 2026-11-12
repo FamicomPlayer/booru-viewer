@@ -119,10 +119,18 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
             headers.containsKey('user_id') ||
             (headers.containsKey(HttpHeaders.cookieHeader) &&
                 (headers[HttpHeaders.cookieHeader]!.contains('pass_hash') ||
-                    headers[HttpHeaders.cookieHeader]!.contains('user_id'))))) {
+                    headers[HttpHeaders.cookieHeader]!.contains('user_id'))) ||
+            // A Derpibooru login made in the browser comes without a key.
+            parseCookies(
+              headers[HttpHeaders.cookieHeader],
+            ).keys.any(philomenaSessionCookies.contains))) {
       if (username.isEmpty || username == 'Anonymous') {
         final uid = headers['user_id'];
-        username = (uid != null && uid.isNotEmpty) ? 'User #$uid' : 'Rule34 User';
+        username = engine == BooruEngine.derpibooru
+            ? 'Derpibooru User'
+            : (uid != null && uid.isNotEmpty)
+            ? 'User #$uid'
+            : 'Rule34 User';
       }
     } else {
       // No name at all is the guest choice, which has to end any session.

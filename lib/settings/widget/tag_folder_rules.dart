@@ -39,8 +39,9 @@ class _TagFolderRulesPageState extends State<TagFolderRulesPage> {
                 hintText: 'e.g. furry, anthro',
                 helperText:
                     'Tags written together in one entry must all match, '
-                    'e.g. "rating:safe female, cute"',
-                helperMaxLines: 3,
+                    'e.g. "rating:safe female". When several rules match, '
+                    'the one asking for the most tags wins.',
+                helperMaxLines: 4,
                 border: OutlineInputBorder(),
               ),
             ),

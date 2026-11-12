@@ -76,6 +76,11 @@ extension IdentityWebLogin on Identity {
   /// asks for a login made in a browser.
   bool get needsWebLogin => BooruEngine.fromHost(host) != BooruEngine.e621;
 
+  /// Whether this identity holds the API key that Derpibooru lists the
+  /// favorites and votes of its user for.
+  bool get hasDerpibooruKey =>
+      (headers?['key'] ?? headers?['X-API-Key'])?.isNotEmpty ?? false;
+
   /// Whether a browser login is stored for this identity.
   bool get hasWebLogin => switch (BooruEngine.fromHost(host)) {
     BooruEngine.rule34 => rule34Session != null,
