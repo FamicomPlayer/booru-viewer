@@ -21,6 +21,33 @@ class CookieCapturePage extends StatefulWidget {
     this.onCookiesCaptured,
   });
 
+  /// The page on which to log into the website of [host], for the favorites
+  /// that Rule34 and Derpibooru only take from a browser.
+  factory CookieCapturePage.login({
+    Key? key,
+    required String host,
+    void Function(Map<String, String> headers, List<Cookie> cookies)?
+    onCookiesCaptured,
+  }) {
+    final BooruEngine engine = BooruEngine.fromHost(host);
+    final bool isRule34 = engine == BooruEngine.rule34;
+    return CookieCapturePage(
+      key: key,
+      title: Text(
+        isRule34 ? 'Rule34 Web Login' : '${engine.displayName} Web Login',
+      ),
+      initialUrl: switch (engine) {
+        BooruEngine.rule34 =>
+          'https://rule34.xxx/index.php?page=account&s=login',
+        BooruEngine.derpibooru => '${normalizeHostUrl(host)}/sessions/new',
+        BooruEngine.e621 => null,
+      },
+      targetHost: isRule34 ? 'https://rule34.xxx' : host,
+      engine: engine,
+      onCookiesCaptured: onCookiesCaptured,
+    );
+  }
+
   final Widget? title;
   final String? initialUrl;
   final String? targetHost;
