@@ -87,8 +87,12 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
               username = creds.userId;
             }
           } else {
-            if (username != null && username.isNotEmpty) {
-              headers['user_id'] = username;
+            // Identities from the web login carry a name here, not their id.
+            final String? userId = username
+                ?.replaceFirst(RegExp('^User #'), '')
+                .trim();
+            if (userId != null && int.tryParse(userId) != null) {
+              headers['user_id'] = userId;
             }
             headers['api_key'] = apikey;
           }
@@ -110,21 +114,19 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
         headers['api_key'] = creds.apiKey;
         username = creds.userId;
       }
-    } else if (headers.containsKey('pass_hash') ||
-        headers.containsKey('user_id') ||
-        (headers.containsKey(HttpHeaders.cookieHeader) &&
-            (headers[HttpHeaders.cookieHeader]!.contains('pass_hash') ||
-             headers[HttpHeaders.cookieHeader]!.contains('user_id')))) {
-      if (username == null || username.isEmpty || username == 'Anonymous') {
+    } else if (username != null &&
+        (headers.containsKey('pass_hash') ||
+            headers.containsKey('user_id') ||
+            (headers.containsKey(HttpHeaders.cookieHeader) &&
+                (headers[HttpHeaders.cookieHeader]!.contains('pass_hash') ||
+                    headers[HttpHeaders.cookieHeader]!.contains('user_id'))))) {
+      if (username.isEmpty || username == 'Anonymous') {
         final uid = headers['user_id'];
         username = (uid != null && uid.isNotEmpty) ? 'User #$uid' : 'Rule34 User';
       }
     } else {
-      headers.remove(HttpHeaders.authorizationHeader);
-      headers.remove('key');
-      headers.remove('X-API-Key');
-      headers.remove('user_id');
-      headers.remove('api_key');
+      // No name at all is the guest choice, which has to end any session.
+      headers = withoutLoginHeaders(headers);
     }
 
     try {

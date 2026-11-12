@@ -3,14 +3,6 @@ import 'dart:convert';
 class TagFolderRule {
   const TagFolderRule({required this.tags, required this.folder});
 
-  final List<String> tags;
-  final String folder;
-
-  Map<String, dynamic> toJson() => {
-    'tags': tags,
-    'folder': folder,
-  };
-
   factory TagFolderRule.fromJson(Map<String, dynamic> json) => TagFolderRule(
     tags: (json['tags'] as List<dynamic>?)
             ?.map((e) => e.toString())
@@ -20,6 +12,14 @@ class TagFolderRule {
     folder: json['folder']?.toString().trim() ?? '',
   );
 
+  final List<String> tags;
+  final String folder;
+
+  Map<String, dynamic> toJson() => {
+    'tags': tags,
+    'folder': folder,
+  };
+
   static List<TagFolderRule> decodeList(String? raw) {
     if (raw == null || raw.trim().isEmpty) return defaultRules;
     try {
@@ -27,7 +27,7 @@ class TagFolderRule {
       return list
           .map((e) => TagFolderRule.fromJson(e as Map<String, dynamic>))
           .toList();
-    } catch (_) {
+    } on Object catch (_) {
       return defaultRules;
     }
   }
