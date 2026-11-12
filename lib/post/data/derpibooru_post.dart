@@ -13,10 +13,20 @@ abstract final class DerpibooruPost {
       final representations = post('representations').asMapOrEmpty<String, dynamic>();
       final fileUrl = representations['full']?.toString() ??
           post('view_url').asStringOrNull();
-      final sampleUrl = representations['large']?.toString() ??
+      // Every representation of a video is a video, only its thumbnails are
+      // also served as a gif.
+      final String? still = (ext == 'webm' || ext == 'mp4')
+          ? representations['thumb']?.toString().replaceFirst(
+              RegExp(r'\.(webm|mp4)$'),
+              '.gif',
+            )
+          : null;
+      final sampleUrl = still ??
+          representations['large']?.toString() ??
           representations['medium']?.toString() ??
           fileUrl;
-      final previewUrl = representations['thumb']?.toString() ??
+      final previewUrl = still ??
+          representations['thumb']?.toString() ??
           representations['small']?.toString() ??
           sampleUrl;
 
