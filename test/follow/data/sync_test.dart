@@ -29,12 +29,16 @@ void main() {
   /// How many searches the API answers before it turns every other away.
   int? turnedAwayAfter;
 
+  /// What is answered in place of posts when set.
+  FakeResponse? page;
+
   setUpAll(initializeTestApp);
 
   setUp(() async {
     Rule34Post.reset();
     failures = {};
     turnedAwayAfter = null;
+    page = null;
     sqlite = AppDatabase(NativeDatabase.memory());
     repository = FollowRepository(database: sqlite);
     identity = await IdentityRepository(sqlite).add(
@@ -58,7 +62,7 @@ void main() {
           adapter.requests.length > turnedAwayAfter!) {
         return const FakeResponse('', status: HttpStatus.tooManyRequests);
       }
-      return FakeResponse.json(fixture);
+      return page ?? FakeResponse.json(fixture);
     });
     final dio = fakeDio(adapter, identity);
     traits = ValueNotifier(
@@ -150,5 +154,50 @@ void main() {
     expect(refreshed['first']!.latest, isNull);
     expect(refreshed['second']!.latest, 1002);
     expect(refreshed['third']!.latest, 1002);
+  });
+
+  test('moves past every search that the site turns down', () async {
+    failures = {
+      for (final tags in ['first', 'second', 'third'])
+        tags: HttpStatus.unprocessableEntity,
+    };
+    await repository.add(const FollowRequest(tags: 'fourth'), identity.id);
+
+    final result = await sync();
+
+    expect(result.error, isNull);
+    final refreshed = await follows();
+    expect(refreshed.values.map((e) => e.updated), everyElement(isNotNull));
+    expect(refreshed['fourth']!.latest, 1002);
+  });
+
+  test('does not pass a site that is down for follows without news', () async {
+    for (final String tags in ['fourth', 'fifth']) {
+      await repository.add(FollowRequest(tags: tags), identity.id);
+    }
+    failures = {
+      for (final follow in (await follows()).keys)
+        follow: HttpStatus.serviceUnavailable,
+    };
+
+    final result = await sync();
+
+    expect(result.error, isA<DioException>());
+    // It gave up after a few, the others are refreshed the next time.
+    final refreshed = (await follows()).values;
+    expect(refreshed.where((e) => e.updated == null), hasLength(2));
+    expect(adapter.requests, hasLength(3));
+    expect(refreshed.map((e) => e.latest), everyElement(isNull));
+  });
+
+  test('does not pass a page in place of posts for a search without '
+      'results', () async {
+    // A check in front of the site answers as found, and with a page.
+    page = const FakeResponse.html('<html><title>Just a moment...</title>');
+
+    final result = await sync();
+
+    expect(result.error, isFormatException);
+    expect((await follows()).values.map((e) => e.latest), everyElement(isNull));
   });
 }

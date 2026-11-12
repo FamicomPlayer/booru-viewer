@@ -97,6 +97,12 @@ class FollowSync {
 
   int? _total;
 
+  /// Failures in a row that the site, not a follow, may be to blame for, and
+  /// how many of them end a run.
+  int _siteFailures = 0;
+  static const int _siteFailureLimit = 3;
+  (Object, StackTrace)? _outage;
+
   List<String> _previousTags = [];
 
   void _assertNoDuplicates(List<String> tags) {
@@ -164,6 +170,10 @@ class FollowSync {
         List<Follow> others = follows.whereNot(singles.contains).toList();
         if (others.isNotEmpty) {
           await _save(await _refreshEach(others));
+          // What was refreshed is kept, the run still ends as a failed one.
+          if (_outage case (final Object error, final StackTrace stacktrace)) {
+            Error.throwWithStackTrace(error, stacktrace);
+          }
           continue;
         }
 
@@ -276,7 +286,8 @@ class FollowSync {
         follow = follow.withUnseen(posts);
         if (engine == BooruEngine.e621) follow = await _withPool(follow);
         result.add(follow);
-      } on Object catch (error) {
+        _siteFailures = 0;
+      } on Object catch (error, stacktrace) {
         final int? status = error is ClientException
             ? error.response?.statusCode
             : null;
@@ -293,6 +304,15 @@ class FollowSync {
             'tags': follow.tags,
           }, error);
           result.add(follow.withTimestamp());
+          // A search the site turns down is at fault itself. Anything else
+          // may be the site failing, which failures in a row give away: the
+          // follows after them are then left to be refreshed another time.
+          final bool turnedDown =
+              status != null && status >= 400 && status < 500;
+          if (!turnedDown && ++_siteFailures >= _siteFailureLimit) {
+            _outage = (error, stacktrace);
+            break;
+          }
           continue;
         }
         // A failed request must not pass for a follow without new posts.

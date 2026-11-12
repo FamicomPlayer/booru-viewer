@@ -58,11 +58,12 @@ void main() {
   });
 
   PostClient clientFor({
+    int id = 1,
     String? username = '42',
     Map<String, String>? headers = const {'user_id': '42', 'api_key': 'k3y'},
   }) {
     final identity = Identity(
-      id: 1,
+      id: id,
       host: 'https://rule34.xxx',
       username: username,
       headers: headers,
@@ -181,6 +182,14 @@ void main() {
       api = (_) => const FakeResponse('');
 
       expect(await clientFor().page(query: {'tags': 'no_such_tag'}), isEmpty);
+    });
+
+    test('does not read a page in place of posts as no posts', () async {
+      // A check in front of the site answers as found, and with a page.
+      api = (_) =>
+          const FakeResponse.html('<html><title>Just a moment...</title>');
+
+      await expectLater(clientFor().page(), throwsFormatException);
     });
 
     test('reports rejected credentials instead of no posts', () async {
@@ -467,8 +476,24 @@ void main() {
         expect(Rule34Post.isFavorited(1001), isFalse);
       });
 
+      test('does not take a check in front of the site for its word', () async {
+        // Served as found, the way a bot check is.
+        for (final String answer in ['<html>Just a moment...</html>', '']) {
+          pages[addfav] = FakeResponse.html(answer);
+
+          await expectLater(
+            clientFor(headers: session).addFavorite(1001),
+            throwsA(isA<WebLoginException>()),
+          );
+          expect(Rule34Post.isFavorited(1001), isFalse);
+        }
+      });
+
       test('needs the session of a web login', () async {
-        await expectLater(clientFor().addFavorite(1001), throwsException);
+        await expectLater(
+          clientFor().addFavorite(1001),
+          throwsA(isA<WebLoginException>()),
+        );
         expect(adapter.requests, isEmpty);
       });
     });
@@ -502,14 +527,54 @@ void main() {
         expect(Rule34Post.isFavorited(1001), isTrue);
       });
 
-      test('forgets a favorite of this device without asking', () async {
+      test('keeps the favorite when the website asks to log in', () async {
         Rule34Post.markFavorited(1001, true);
+        pages[delete] = const FakeResponse.html(
+          '<form><input name="user"><input type="password" name="pass"></form>',
+        );
 
-        await clientFor().removeFavorite(1001);
+        await expectLater(
+          clientFor(headers: session).removeFavorite(1001),
+          throwsA(isA<WebLoginException>()),
+        );
+        expect(Rule34Post.isFavorited(1001), isTrue);
+      });
+
+      test('forgets a favorite of this device without asking', () async {
+        final Post post = (await clientFor().page()).first;
+        Rule34Post.markFavorited(post.id, true, post: post);
+        addTearDown(() => LocalFavorites.remove('rule34.xxx', post.id));
+        expect(LocalFavorites.isFavorited('rule34.xxx', post.id), isTrue);
+        adapter.requests.clear();
+
+        await clientFor().removeFavorite(post.id);
 
         expect(adapter.requests, isEmpty);
-        expect(Rule34Post.isFavorited(1001), isFalse);
+        expect(Rule34Post.isFavorited(post.id), isFalse);
+        expect(LocalFavorites.isFavorited('rule34.xxx', post.id), isFalse);
       });
+
+      test('does not pass a favorite on the site for taken back', () async {
+        // Seen among the favorites on the site, which only a session undoes.
+        Rule34Post.markFavorited(1001, true);
+
+        await expectLater(
+          clientFor().removeFavorite(1001),
+          throwsA(isA<WebLoginException>()),
+        );
+
+        expect(adapter.requests, isEmpty);
+        expect(Rule34Post.isFavorited(1001), isTrue);
+      });
+    });
+
+    test('are not remembered for another account', () async {
+      clientFor(headers: session);
+      Rule34Post.markFavorited(1001, true);
+
+      clientFor(id: 2, username: '43', headers: {'user_id': '43'});
+
+      expect(Rule34Post.isFavorited(1001), isFalse);
     });
   });
 }

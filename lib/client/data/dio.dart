@@ -30,6 +30,16 @@ class BooruAuthInterceptor extends Interceptor {
   /// What Rule34 answers, with status 200, when credentials are absent or wrong.
   static const String rule34MissingAuth = 'Missing authentication';
 
+  /// Whether [host] belongs to the site of [other], as its subdomains do.
+  static bool _isSameSite(String host, String? other) {
+    String site(String host) {
+      final List<String> labels = host.toLowerCase().split('.');
+      return labels.skip(labels.length > 2 ? labels.length - 2 : 0).join('.');
+    }
+
+    return other != null && site(host) == site(other);
+  }
+
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     // API credentials must not follow requests to CDN or website hosts.
@@ -55,13 +65,11 @@ class BooruAuthInterceptor extends Interceptor {
         // The browser login is for the site alone, not for where its files are.
         if (!isApiHost) options.headers.remove(HttpHeaders.cookieHeader);
       case BooruEngine.rule34:
-        final cookieHeader = identity.headers?[HttpHeaders.cookieHeader] ?? identity.headers?['Cookie'];
-        final cookieUserId = cookieHeader != null
-            ? RegExp(r'(?:^|;\s*)user_id=(\d+)').firstMatch(cookieHeader)?.group(1)
+        final Map<String, String> stored = identity.cookies;
+        final cookieUserId = int.tryParse(stored['user_id'] ?? '') != null
+            ? stored['user_id']
             : null;
-        final cookiePassHash = cookieHeader != null
-            ? RegExp(r'(?:^|;\s*)pass_hash=([a-fA-F0-9]+)').firstMatch(cookieHeader)?.group(1)
-            : null;
+        final cookiePassHash = stored['pass_hash'];
 
         final userId = identity.headers?['user_id'] ??
             cookieUserId ??
@@ -96,7 +104,10 @@ class BooruAuthInterceptor extends Interceptor {
         }
         if (userId != null && userId.isNotEmpty) jar['user_id'] = userId;
         if (passHash != null && passHash.isNotEmpty) jar['pass_hash'] = passHash;
-        if (jar.isNotEmpty) {
+        // The browser login is for the site and its own hosts alone.
+        if (!_isSameSite(options.uri.host, Uri.tryParse(options.baseUrl)?.host)) {
+          options.headers.remove(HttpHeaders.cookieHeader);
+        } else if (jar.isNotEmpty) {
           options.headers[HttpHeaders.cookieHeader] = jar.entries
               .map((e) => '${e.key}=${e.value}')
               .join('; ');

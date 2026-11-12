@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math';
 
 import 'package:e1547/account/account.dart';
@@ -41,10 +40,7 @@ class LikeDisplay extends StatelessWidget {
               MutationBuilder(
                 mutation: client.posts.useVote(id: post.id),
                 builder: (context, state, mutate) {
-                  // Only e621 takes votes through its API.
-                  final bool enabled = client.engine == BooruEngine.e621 &&
-                      client.hasLogin &&
-                      !state.isLoading;
+                  final bool enabled = client.canVote && !state.isLoading;
                   return VoteDisplay(
                     vote: post.vote,
                     score: post.score,
@@ -145,72 +141,90 @@ class _FavoriteButtonState extends State<FavoriteButton> {
       onTap: (isLiked) async {
         if (_loading) return isLiked;
 
-        if (client.engine == BooruEngine.rule34) {
-          final currentIdentity = context.mounted ? context.read<IdentityClient>().identity : client.identity;
-          final rawCookie = currentIdentity.headers?[HttpHeaders.cookieHeader] ??
-              currentIdentity.headers?['Cookie'] ??
-              currentIdentity.headers?['cookie'];
-          final hasPassHash = currentIdentity.headers?['pass_hash'] != null ||
-              (rawCookie?.toLowerCase().contains('pass_hash=') ?? false);
-          if (!hasPassHash && !isLiked) {
-            if (context.mounted) {
-              final proceed = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('Rule34 Web Login'),
-                  content: const Text(
-                    'Favoriting on Rule34 server requires logging into your account once via the web login page so the site grants write access to your favorites.\n\nWould you like to log in now, or save locally?',
+        Identity identity() => context.mounted
+            ? context.read<IdentityClient>().identity
+            : client.identity;
+        final String site = client.engine.displayName;
+
+        // Whether the site takes favorites from this identity: e621 through
+        // its API, Rule34 and Derpibooru through their website alone, which
+        // asks for a login made in a browser.
+        bool online() => identity().needsWebLogin
+            ? identity().hasWebLogin
+            : client.hasLogin;
+
+        if (!online() && !isLiked) {
+          if (identity().needsWebLogin && context.mounted) {
+            final proceed = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text('$site Web Login'),
+                content: Text(
+                  'Favoriting on $site requires logging into your account once via the web login page so the site grants write access to your favorites.\n\nWould you like to log in now, or save locally?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Save Locally'),
                   ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      child: const Text('Save Locally'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(true),
-                      child: const Text('Log In'),
-                    ),
-                  ],
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: const Text('Log In'),
+                  ),
+                ],
+              ),
+            );
+            // Dismissing the dialog is neither of its two answers.
+            if (proceed == null) return isLiked;
+            if (proceed == true && context.mounted) {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) =>
+                      CookieCapturePage.login(
+                        host: client.host,
+                        identity: client.identity.id,
+                      ),
                 ),
               );
-              // Dismissing the dialog is neither of its two answers.
-              if (proceed == null) return isLiked;
-              if (proceed == true && context.mounted) {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const CookieCapturePage(
-                      title: Text('Rule34 Web Login'),
-                      initialUrl: 'https://rule34.xxx/index.php?page=account&s=login',
-                      targetHost: 'https://rule34.xxx',
-                      engine: BooruEngine.rule34,
-                    ),
-                  ),
-                );
-              }
-            }
-            final refreshedIdentity = context.mounted ? context.read<IdentityClient>().identity : client.identity;
-            final refreshedCookie = refreshedIdentity.headers?[HttpHeaders.cookieHeader] ??
-                refreshedIdentity.headers?['Cookie'] ??
-                refreshedIdentity.headers?['cookie'];
-            final nowHasPassHash = refreshedIdentity.headers?['pass_hash'] != null ||
-                (refreshedCookie?.toLowerCase().contains('pass_hash=') ?? false);
-            if (!nowHasPassHash) {
-              const newFav = true;
-              Rule34Post.markFavorited(post.id, newFav, post: post, host: client.host);
-              final updatedPost = post.copyWith(
-                isFavorited: newFav,
-                favCount: post.favCount + 1,
-              );
-              client.posts.postCache.set(updatedPost);
-              messenger.showSnackBar(
-                const SnackBar(
-                  content: Text('Saved to Local Favorites! (Log in to sync with Rule34)'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-              return newFav;
             }
           }
+          if (!online()) {
+            Rule34Post.markFavorited(
+              post.id,
+              true,
+              post: post,
+              host: client.host,
+            );
+            client.posts.postCache.set(
+              post.copyWith(isFavorited: true, favCount: post.favCount + 1),
+            );
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(
+                  identity().needsWebLogin
+                      ? 'Saved to Local Favorites! (Log in to sync with $site)'
+                      : 'Saved to Local Favorites!',
+                ),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+            return true;
+          }
+        }
+
+        // A favorite that only this device knows of is taken back on it, the
+        // site would not hear of it from this identity.
+        if (!online() &&
+            isLiked &&
+            LocalFavorites.isFavorited(client.host, post.id)) {
+          Rule34Post.markFavorited(post.id, false, host: client.host);
+          client.posts.postCache.set(
+            post.copyWith(
+              isFavorited: false,
+              favCount: max(0, post.favCount - 1),
+            ),
+          );
+          return false;
         }
 
         final activeClient = context.mounted ? context.read<Client>() : client;
@@ -224,7 +238,24 @@ class _FavoriteButtonState extends State<FavoriteButton> {
           }
 
           final newFav = !isLiked;
-          Rule34Post.markFavorited(post.id, newFav, post: post, host: activeClient.host);
+          // The device keeps a copy of what the site does not tell this
+          // identity of again: Rule34 never does, Derpibooru only with a key.
+          // Elsewhere it only holds on to what the site has not taken yet.
+          final bool keepsCopy = switch (activeClient.engine) {
+            BooruEngine.rule34 => true,
+            BooruEngine.derpibooru => !activeClient.identity.hasDerpibooruKey,
+            BooruEngine.e621 => false,
+          };
+          if (keepsCopy) {
+            Rule34Post.markFavorited(
+              post.id,
+              newFav,
+              post: post,
+              host: activeClient.host,
+            );
+          } else {
+            await LocalFavorites.remove(activeClient.host, post.id);
+          }
           final updatedPost = post.copyWith(
             isFavorited: newFav,
             favCount: newFav ? post.favCount + 1 : max(0, post.favCount - 1),
@@ -241,15 +272,21 @@ class _FavoriteButtonState extends State<FavoriteButton> {
           }
           return newFav;
         } on Object catch (e) {
-          // If server call fails, fallback to local favorite so user doesn't lose it
-          if (!isLiked) {
-            Rule34Post.markFavorited(post.id, true, post: post, host: client.host);
-            final updatedPost = post.copyWith(isFavorited: true);
-            client.posts.postCache.set(updatedPost);
+          // Where favorites can be handed in later, one that the site did
+          // not take is kept for that.
+          if (!isLiked && activeClient.identity.needsWebLogin) {
+            Rule34Post.markFavorited(
+              post.id,
+              true,
+              post: post,
+              host: activeClient.host,
+            );
+            activeClient.posts.postCache.set(post.copyWith(isFavorited: true));
             messenger.showSnackBar(
-              const SnackBar(
-                duration: Duration(seconds: 3),
-                content: Text('Server favorite failed. Saved to Local Favorites!'),
+              SnackBar(
+                content: Text(
+                  'Could not favorite on $site: $e\nSaved to Local Favorites instead.',
+                ),
               ),
             );
             return true;

@@ -33,6 +33,13 @@ void main() {
       expect(
         withoutLoginHeaders({
           HttpHeaders.cookieHeader:
+              'cf_clearance=keep; _philomena_key=x; user_remember_me=y',
+        }),
+        {HttpHeaders.cookieHeader: 'cf_clearance=keep'},
+      );
+      expect(
+        withoutLoginHeaders({
+          HttpHeaders.cookieHeader:
               'cf_clearance=keep; user_id=42; pass_hash=abc; PHPSESSID=x',
         }),
         {HttpHeaders.cookieHeader: 'cf_clearance=keep'},
