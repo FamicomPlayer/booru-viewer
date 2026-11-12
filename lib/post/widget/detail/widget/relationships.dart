@@ -9,9 +9,11 @@ class RelationshipDisplay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int? parentId = post.relationships.parentId;
+    final int? parentId = (post.relationships.parentId != null && post.relationships.parentId! > 0)
+        ? post.relationships.parentId
+        : null;
     final List<int> children = (post.relationships.hasActiveChildren ?? true)
-        ? post.relationships.children
+        ? post.relationships.children.where((id) => id > 0).toList()
         : const [];
     if (parentId == null && children.isEmpty) return const SizedBox.shrink();
 

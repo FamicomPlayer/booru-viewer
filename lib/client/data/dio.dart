@@ -31,7 +31,16 @@ class BooruAuthInterceptor extends Interceptor {
           options.headers['X-API-Key'] = key;
         }
       case BooruEngine.rule34:
+        final cookieHeader = identity.headers?[HttpHeaders.cookieHeader] ?? identity.headers?['Cookie'];
+        final cookieUserId = cookieHeader != null
+            ? RegExp(r'(?:^|;\s*)user_id=(\d+)').firstMatch(cookieHeader)?.group(1)
+            : null;
+        final cookiePassHash = cookieHeader != null
+            ? RegExp(r'(?:^|;\s*)pass_hash=([a-fA-F0-9]+)').firstMatch(cookieHeader)?.group(1)
+            : null;
+
         final userId = identity.headers?['user_id'] ??
+            cookieUserId ??
             (identity.username != null && int.tryParse(identity.username!) != null
                 ? identity.username
                 : null);
@@ -40,6 +49,7 @@ class BooruAuthInterceptor extends Interceptor {
             (identity.headers?[HttpHeaders.authorizationHeader] != null
                 ? parseBasicAuth(identity.headers?[HttpHeaders.authorizationHeader])?.$2
                 : null);
+        final passHash = identity.headers?['pass_hash'] ?? cookiePassHash;
 
         if (userId != null && userId.isNotEmpty) {
           options.queryParameters.putIfAbsent('user_id', () => userId);
@@ -47,6 +57,29 @@ class BooruAuthInterceptor extends Interceptor {
         if (apiKey != null && apiKey.isNotEmpty) {
           options.queryParameters.putIfAbsent('api_key', () => apiKey);
         }
+
+        final jar = <String, String>{};
+        final existingRaw = options.headers[HttpHeaders.cookieHeader] ??
+            options.headers['Cookie'] ??
+            identity.headers?[HttpHeaders.cookieHeader];
+        if (existingRaw != null) {
+          for (final part in existingRaw.toString().split('; ')) {
+            final idx = part.indexOf('=');
+            if (idx > 0) jar[part.substring(0, idx).trim()] = part.substring(idx + 1).trim();
+          }
+        }
+        if (userId != null && userId.isNotEmpty) jar['user_id'] = userId;
+        if (passHash != null && passHash.isNotEmpty) jar['pass_hash'] = passHash;
+        if (jar.isNotEmpty) {
+          final cookieStr = jar.entries.map((e) => '${e.key}=${e.value}').join('; ');
+          options.headers[HttpHeaders.cookieHeader] = cookieStr;
+          options.headers['Cookie'] = cookieStr;
+        }
+        final ua = identity.headers?[HttpHeaders.userAgentHeader] ?? identity.headers?['user_agent'];
+        if (ua != null && ua.isNotEmpty) {
+          options.headers[HttpHeaders.userAgentHeader] = ua;
+        }
+        options.headers.putIfAbsent('Referer', () => 'https://rule34.xxx/');
       case BooruEngine.e621:
         break;
     }
@@ -77,11 +110,15 @@ Dio createDefaultDio(Identity identity, {CachedQuery? queryCache}) {
     baseUrl = 'https://api.rule34.xxx';
   }
 
+  final userAgent = identity.headers?[HttpHeaders.userAgentHeader] ??
+      identity.headers?['user_agent'] ??
+      AppInfo.instance.userAgent;
+
   final dio = Dio(
     BaseOptions(
       baseUrl: baseUrl,
       headers: {
-        HttpHeaders.userAgentHeader: AppInfo.instance.userAgent,
+        HttpHeaders.userAgentHeader: userAgent,
         ...?identity.headers,
       },
       sendTimeout: const Duration(seconds: 30),

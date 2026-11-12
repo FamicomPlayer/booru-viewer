@@ -90,22 +90,32 @@ class CommentHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Dimmed(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(4),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => UserLoadingPage(comment.creatorId),
+        Flexible(
+          child: Dimmed(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => UserLoadingPage(comment.creatorId),
+                ),
               ),
-            ),
-            child: TimedText(
-              created: comment.createdAt,
-              updated: comment.updatedAt,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [Flexible(child: Text(comment.creatorName))],
+              child: TimedText(
+                created: comment.createdAt,
+                updated: comment.updatedAt,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          comment.creatorName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

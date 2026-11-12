@@ -248,6 +248,20 @@ class SettingsPage extends StatelessWidget {
                     },
                   ),
                 ),
+                ValueListenableBuilder<String>(
+                  valueListenable: settings.downloadFileNameFormat,
+                  builder: (context, format, child) => ListTile(
+                    leading: const Icon(Icons.drive_file_rename_outline),
+                    title: const Text('Download filename format'),
+                    subtitle: Text(format),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const DownloadFileNameFormatPage(),
+                      ),
+                    ),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.create_new_folder),
                   title: const Text('Tag-based download folders'),

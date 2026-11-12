@@ -85,7 +85,7 @@ extension Updating on Follow {
         posts = posts.takeWhile((e) => e.id > updated.latest!).toList();
         int length = posts.length;
         if (length > 0) {
-          updated = updated.copyWith(unseen: updated.unseen! + length);
+          updated = updated.copyWith(unseen: (updated.unseen ?? 0) + length);
         }
       } else {
         updated = updated.copyWith(unseen: 0);

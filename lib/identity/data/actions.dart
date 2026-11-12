@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:e1547/identity/identity.dart';
 
 String encodeBasicAuth(String username, String password) =>
@@ -70,5 +72,17 @@ extension HostedUrlsExtenstion on Identity {
 }
 
 extension IdentityUsernaming on Identity {
-  String get usernameOrAnon => username ?? 'Anonymous';
+  String get usernameOrAnon {
+    if (username != null && username!.isNotEmpty && username != 'Anonymous') {
+      return username!;
+    }
+    final uid = headers?['user_id'];
+    if (uid != null && uid.isNotEmpty) return 'User #$uid';
+    final cookie = headers?[HttpHeaders.cookieHeader];
+    if (cookie != null) {
+      final match = RegExp(r'user_id=(\d+)').firstMatch(cookie);
+      if (match != null) return 'User #${match.group(1)}';
+    }
+    return 'Anonymous';
+  }
 }

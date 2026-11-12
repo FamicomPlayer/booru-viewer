@@ -6,6 +6,8 @@ import 'package:e1547/client/client.dart';
 import 'package:e1547/files/files.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/logs/logs.dart';
+import 'package:e1547/post/data/local_favorites.dart';
+import 'package:e1547/post/data/rule34_post.dart';
 import 'package:e1547/query/query.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -130,6 +132,8 @@ Future<AppStorage> initializeAppStorage() async {
       ),
     ),
   );
+  Rule34Post.initDatabase(sqlite);
+  LocalFavorites.init(sqlite);
   await discardLegacyFileCache();
   return AppStorage(
     preferences: await SharedPreferences.getInstance(),

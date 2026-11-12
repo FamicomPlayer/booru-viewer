@@ -90,30 +90,34 @@ class ReplyHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Dimmed(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(4),
-            child: TimedText(
-              created: reply.createdAt,
-              updated: reply.updatedAt,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4, bottom: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        reply.creator,
-                        style: TextStyle(color: dimTextColor(context)),
+        Flexible(
+          child: Dimmed(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              child: TimedText(
+                created: reply.createdAt,
+                updated: reply.updatedAt,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          reply.creator,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: dimTextColor(context)),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => UserLoadingPage(reply.creatorId),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => UserLoadingPage(reply.creatorId),
+                ),
               ),
             ),
           ),

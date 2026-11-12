@@ -295,55 +295,56 @@ class PostFeedTile extends StatelessWidget {
                 Text(post.commentCount.toString()),
               ],
             ),
-            MutationBuilder(
-              mutation: context.watch<Client>().posts.useVote(id: post.id),
-              builder: (context, state, mutate) {
-                final client = context.watch<Client>();
-                final messenger = ScaffoldMessenger.of(context);
-                final enabled = client.hasLogin && !state.isLoading;
+            if (context.watch<Client>().engine != BooruEngine.rule34)
+              MutationBuilder(
+                mutation: context.watch<Client>().posts.useVote(id: post.id),
+                builder: (context, state, mutate) {
+                  final client = context.watch<Client>();
+                  final messenger = ScaffoldMessenger.of(context);
+                  final enabled = client.hasLogin && !state.isLoading;
 
-                return VoteDisplay(
-                  vote: post.vote,
-                  score: post.score,
-                  onUpvote: enabled
-                      ? (isLiked) async {
-                          mutate((upvote: true, replace: !isLiked)).catchError((
-                            error,
-                          ) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                duration: const Duration(seconds: 1),
-                                content: Text(
-                                  'Failed to upvote Post #${post.id}',
-                                ),
-                              ),
-                            );
-                            return error;
-                          });
-                          return !isLiked;
-                        }
-                      : null,
-                  onDownvote: enabled
-                      ? (isLiked) async {
-                          mutate((upvote: false, replace: !isLiked)).catchError(
-                            (error) {
+                  return VoteDisplay(
+                    vote: post.vote,
+                    score: post.score,
+                    onUpvote: enabled
+                        ? (isLiked) async {
+                            mutate((upvote: true, replace: !isLiked)).catchError((
+                              error,
+                            ) {
                               messenger.showSnackBar(
                                 SnackBar(
                                   duration: const Duration(seconds: 1),
                                   content: Text(
-                                    'Failed to downvote Post #${post.id}',
+                                    'Failed to upvote Post #${post.id}',
                                   ),
                                 ),
                               );
                               return error;
-                            },
-                          );
-                          return !isLiked;
-                        }
-                      : null,
-                );
-              },
-            ),
+                            });
+                            return !isLiked;
+                          }
+                        : null,
+                    onDownvote: enabled
+                        ? (isLiked) async {
+                            mutate((upvote: false, replace: !isLiked)).catchError(
+                              (error) {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    duration: const Duration(seconds: 1),
+                                    content: Text(
+                                      'Failed to downvote Post #${post.id}',
+                                    ),
+                                  ),
+                                );
+                                return error;
+                              },
+                            );
+                            return !isLiked;
+                          }
+                        : null,
+                  );
+                },
+              ),
             Row(
               children: [
                 FavoriteButton(post: post),

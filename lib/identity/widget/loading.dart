@@ -14,6 +14,7 @@ class LoginLoadingDialog extends StatefulWidget {
     required this.host,
     required this.username,
     required this.apikey,
+    this.extraHeaders,
     this.activate = false,
     this.onError,
     this.onDone,
@@ -23,6 +24,7 @@ class LoginLoadingDialog extends StatefulWidget {
   final String host;
   final String? username;
   final String? apikey;
+  final Map<String, String>? extraHeaders;
   final bool activate;
   final ValueSetter<String?>? onError;
   final VoidCallback? onDone;
@@ -46,6 +48,9 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
     String? username = widget.username;
     String? apikey = widget.apikey;
     Map<String, String>? headers = Map.of(identity?.headers ?? {});
+    if (widget.extraHeaders != null) {
+      headers.addAll(widget.extraHeaders!);
+    }
     final engine = BooruEngine.fromHost(host);
 
     if (apikey != null && apikey.isNotEmpty) {
@@ -104,6 +109,15 @@ class _LoginLoadingDialogState extends State<LoginLoadingDialog> {
         headers['user_id'] = creds.userId;
         headers['api_key'] = creds.apiKey;
         username = creds.userId;
+      }
+    } else if (headers.containsKey('pass_hash') ||
+        headers.containsKey('user_id') ||
+        (headers.containsKey(HttpHeaders.cookieHeader) &&
+            (headers[HttpHeaders.cookieHeader]!.contains('pass_hash') ||
+             headers[HttpHeaders.cookieHeader]!.contains('user_id')))) {
+      if (username == null || username.isEmpty || username == 'Anonymous') {
+        final uid = headers['user_id'];
+        username = (uid != null && uid.isNotEmpty) ? 'User #$uid' : 'Rule34 User';
       }
     } else {
       headers.remove(HttpHeaders.authorizationHeader);

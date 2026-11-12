@@ -74,12 +74,13 @@ extension PostTagging on Post {
 
     if (tag.contains('*')) {
       final RegExp pattern = RegExp(
-        '^${RegExp.escape(tag.toLowerCase()).replaceAll(r'\*', '.*')}\$',
+        '^${RegExp.escape(tag.toLowerCase().replaceAll(' ', '_')).replaceAll(r'\*', '.*')}\$',
       );
-      return tags.values.any((category) => category.any(pattern.hasMatch));
+      return tags.values.any((category) => category.any((t) => pattern.hasMatch(t.toLowerCase().replaceAll(' ', '_'))));
     }
 
-    return tags.values.any((category) => category.contains(tag.toLowerCase()));
+    final norm = tag.trim().toLowerCase().replaceAll(' ', '_');
+    return tags.values.any((category) => category.any((t) => t.trim().toLowerCase().replaceAll(' ', '_') == norm));
   }
 }
 

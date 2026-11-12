@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:e1547/app/app.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/logs/logs.dart';
 import 'package:e1547/post/post.dart';
@@ -287,13 +286,36 @@ class TasksController extends ChangeNotifier {
     }
     final ValueNotifier<double>? progress = _progress[task.id];
 
+    String finalFileName = fileName;
     String folderName = AppInfo.instance.appName;
     try {
-      final postQuery = client.posts.useGet(id: task.postId);
-      await postQuery.fetch();
-      final post = postQuery.state.data;
+      Post? post = client.posts.postCache.get(task.postId);
+      if (post == null) {
+        final postQuery = client.posts.useGet(id: task.postId);
+        await postQuery.fetch();
+        post = postQuery.state.data;
+      }
       if (post != null) {
-        final postTags = post.tags.values
+        Post currentPost = post;
+        if (client.engine == BooruEngine.rule34) {
+          final nonGeneralCount = (currentPost.tags['artist']?.length ?? 0) +
+              (currentPost.tags['copyright']?.length ?? 0) +
+              (currentPost.tags['character']?.length ?? 0) +
+              (currentPost.tags['meta']?.length ?? 0);
+          if (nonGeneralCount == 0 && (currentPost.tags['general']?.isNotEmpty ?? false)) {
+            try {
+              currentPost = await Rule34Post.resolveTagCategories(currentPost, client.dio);
+              client.posts.postCache.set(currentPost);
+            } catch (_) {}
+          }
+        }
+
+        finalFileName = DownloadFileNameGenerator.generate(
+          currentPost,
+          format: settings.downloadFileNameFormat.value,
+        );
+
+        final postTags = currentPost.tags.values
             .expand((t) => t)
             .map((t) => t.toLowerCase())
             .toSet();
@@ -323,7 +345,7 @@ class TasksController extends ChangeNotifier {
             file: response.file,
             directory: settings.downloadPath.value,
             folderName: folderName,
-            fileName: fileName,
+            fileName: finalFileName,
             onDirectoryChanged: (p) => settings.downloadPath.value = p,
           );
         } on FileDownloadException {

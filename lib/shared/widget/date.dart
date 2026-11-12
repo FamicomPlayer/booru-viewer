@@ -22,11 +22,15 @@ class TimedText extends StatelessWidget {
       textBaseline: TextBaseline.ideographic,
       children: [
         Flexible(child: child),
-        Text(
-          ' • ${created.relativeTime(context)}'
-          '${updated != null && updated!.isAfter(created) ? ' (edited)' : ''}',
-          maxLines: 1,
-          style: TextStyle(fontSize: 12, color: dimTextColor(context)),
+        Flexible(
+          fit: FlexFit.loose,
+          child: Text(
+            ' • ${created.relativeTime(context)}'
+            '${updated != null && updated!.isAfter(created) ? ' (edited)' : ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: dimTextColor(context)),
+          ),
         ),
       ],
     );

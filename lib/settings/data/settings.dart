@@ -58,6 +58,11 @@ class Settings extends NotifiedSettings {
     initialValue: null,
   );
 
+  late final ValueNotifier<String> downloadFileNameFormat = createSetting<String>(
+    key: 'downloadFileNameFormat',
+    initialValue: '{artist} - {id}.{extension}',
+  );
+
   late final ValueNotifier<String> tagFolderRulesRaw = createSetting<String>(
     key: 'tagFolderRules',
     initialValue: TagFolderRule.encodeList(TagFolderRule.defaultRules),

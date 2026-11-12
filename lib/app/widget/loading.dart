@@ -241,36 +241,38 @@ class LoadingCore extends StatefulWidget {
 }
 
 class _LoadingCoreState extends State<LoadingCore> {
-  late LoadingShellController state;
+  LoadingShellController? _state;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      state = LoadingShell.of(context);
-      state.value = state.value.copyWith(loading: false);
-    });
+  void _onStateChange() {
+    if (!mounted) return;
+    if (_state != null && !_state!.isDisposed && _state!.value.loading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _state == null || _state!.isDisposed) return;
+        if (_state!.value.loading) {
+          _state!.value = _state!.value.copyWith(loading: false);
+        }
+      });
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    LoadingShellController newState = LoadingShell.of(context);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (newState.value != state.value) {
-        state = newState;
-        state.value = state.value.copyWith(loading: false);
-      }
-    });
+    final newState = LoadingShell.maybeOf(context);
+    if (newState != _state) {
+      _state?.removeListener(_onStateChange);
+      _state = newState;
+      _state?.addListener(_onStateChange);
+    }
+    _onStateChange();
   }
 
   @override
   void dispose() {
-    final capturedState = state;
+    _state?.removeListener(_onStateChange);
+    final capturedState = _state;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!capturedState.isDisposed) {
+      if (capturedState != null && !capturedState.isDisposed) {
         capturedState.value = capturedState.value.copyWith(loading: true);
       }
     });

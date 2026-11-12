@@ -260,6 +260,7 @@ class ApikeyFormField extends StatefulWidget {
     super.key,
     required this.controller,
     this.canOmit = false,
+    this.optional = false,
     this.host = '',
     this.labelText = 'API key',
     this.hintText,
@@ -269,6 +270,7 @@ class ApikeyFormField extends StatefulWidget {
 
   final TextEditingController controller;
   final bool canOmit;
+  final bool optional;
   final String host;
   final String labelText;
   final String? hintText;
@@ -325,6 +327,10 @@ class _ApikeyFormFieldState extends State<ApikeyFormField> {
         autofillHints: const [AutofillHints.password],
         textInputAction: TextInputAction.done,
         validator: (value) {
+          if (widget.optional && (value == null || value.trim().isEmpty)) {
+            return null;
+          }
+
           if (value == null || value.isEmpty) {
             return 'You must provide credentials or an API key.';
           }

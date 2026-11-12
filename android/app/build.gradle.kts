@@ -30,7 +30,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "net.e1547"
+        applicationId = "net.e1547.booruviewer"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

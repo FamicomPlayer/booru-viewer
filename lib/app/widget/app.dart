@@ -43,7 +43,7 @@ class App extends StatelessWidget {
                     value.data.appBarTheme.systemOverlayStyle ??
                     const SystemUiOverlayStyle(),
                 child: SubValue<GlobalKey<NavigatorState>>(
-                  create: () => GlobalKey<NavigatorState>(),
+                  create: () => AppNavigator.key,
                   builder: (context, navigatorKey) => MaterialApp(
                     title: AppInfo.instance.appName,
                     theme: value.data,
@@ -59,8 +59,19 @@ class App extends StatelessWidget {
                       context.watch<AnyRouteObserver>(),
                       RouteLoggerObserver(),
                     ],
+                    debugShowCheckedModeBanner: false,
                     routes: context.watch<RouterDrawerController>().routes,
-                    builder: (context, child) => WindowFrame(
+                    builder: (context, child) => Banner(
+                      message: 'v${AppInfo.instance.version}+${AppInfo.instance.buildNumber}',
+                      location: BannerLocation.bottomStart,
+                      color: Colors.pinkAccent,
+                      textStyle: const TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                        color: Colors.white,
+                      ),
+                      child: WindowFrame(
                       child: WindowShortcuts(
                         navigatorKey: navigatorKey,
                         child: SecureDisplay(
@@ -100,6 +111,7 @@ class App extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
                 ),
               ),
             ),

@@ -44,6 +44,16 @@ class _PostFullscreenGalleryState extends State<PostFullscreenGallery>
           );
         }
 
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Rule34Post.preloadSurroundingTags(
+            context,
+            index,
+            items ?? [],
+            reach: 3,
+          );
+        });
+
         return SubDefault<PageController>(
           value: widget.pageController,
           create: () => PageController(initialPage: index),
@@ -73,6 +83,12 @@ class _PostFullscreenGalleryState extends State<PostFullscreenGallery>
                       index: index,
                       posts: items ?? [],
                       size: PostImageSize.file,
+                    );
+                    Rule34Post.preloadSurroundingTags(
+                      context,
+                      index,
+                      items ?? [],
+                      reach: 3,
                     );
                   },
                   builderDelegate: defaultPagedChildBuilderDelegate(

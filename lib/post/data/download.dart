@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:e1547/post/post.dart';
 import 'package:e1547/shared/shared.dart';
-import 'package:e1547/tag/tag.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -24,6 +23,7 @@ extension PostDownloading on Post {
     required void Function(String value) onPathChanged,
     required String folder,
     required BaseCacheManager cache,
+    String? fileNameFormat,
   }) async {
     try {
       String? url = file;
@@ -38,7 +38,7 @@ extension PostDownloading on Post {
         file: downloadFile,
         directory: path,
         folderName: folder,
-        fileName: _downloadName(),
+        fileName: DownloadFileNameGenerator.generate(this, format: fileNameFormat),
         onDirectoryChanged: onPathChanged,
       );
     } on FileDownloadException {
@@ -46,14 +46,5 @@ extension PostDownloading on Post {
     } on Exception catch (e) {
       throw FileDownloadException.from(e);
     }
-  }
-
-  String _downloadName() {
-    String filename = '';
-    List<String> artists = filterArtists(tags['artist'] ?? []);
-    if (artists.isNotEmpty) {
-      filename = '${artists.join(', ')} - ';
-    }
-    return filename += '$id.$ext';
   }
 }

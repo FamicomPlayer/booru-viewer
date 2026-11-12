@@ -119,13 +119,30 @@ extension ClientExtension on Client {
   String get host => identity.host;
   BooruEngine get engine => BooruEngine.fromHost(identity.host);
   bool get hasLogin {
-    if (identity.username != null && identity.username!.isNotEmpty) return true;
+    if (identity.username != null &&
+        identity.username!.isNotEmpty &&
+        identity.username != 'Anonymous') {
+      return true;
+    }
     final headers = identity.headers;
     if (headers == null) return false;
-    return headers.containsKey('key') ||
+    if (headers.containsKey('key') ||
         headers.containsKey('X-API-Key') ||
         headers.containsKey('api_key') ||
-        headers.containsKey(HttpHeaders.authorizationHeader);
+        headers.containsKey('pass_hash') ||
+        headers.containsKey('user_id') ||
+        headers.containsKey(HttpHeaders.authorizationHeader)) {
+      return true;
+    }
+    final cookie = headers[HttpHeaders.cookieHeader];
+    if (cookie != null &&
+        (cookie.contains('pass_hash') ||
+         cookie.contains('user_id') ||
+         cookie.contains('PHPSESSID') ||
+         cookie.contains('_session'))) {
+      return true;
+    }
+    return false;
   }
   String withHost(String path) => identity.withHost(path);
 }

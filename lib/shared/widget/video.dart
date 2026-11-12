@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:e1547/logs/logs.dart';
 import 'package:e1547/settings/settings.dart';
@@ -31,7 +32,14 @@ class VideoPlayer extends Player {
     );
   }
 
-  late final VideoController _controller = VideoController(this);
+  late final VideoController _controller = VideoController(
+    this,
+    configuration: VideoControllerConfiguration(
+      enableHardwareAcceleration: false,
+      vo: Platform.isAndroid ? 'mediacodec_embed' : null,
+      hwdec: Platform.isAndroid ? 'mediacodec' : null,
+    ),
+  );
   VideoController get controller => _controller;
 
   final List<StreamSubscription> _subscriptions = [];

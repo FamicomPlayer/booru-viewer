@@ -1,6 +1,6 @@
 import 'package:e1547/post/post.dart';
+import 'package:e1547/settings/settings.dart';
 import 'package:e1547/shared/shared.dart';
-import 'package:e1547/tag/tag.dart';
 import 'package:e1547/task/task.dart';
 import 'package:flutter/material.dart';
 
@@ -12,6 +12,9 @@ Future<void> postDownloadingNotification(
 ) async {
   if (items.isEmpty) return;
   final TasksController controller = context.read<TasksController>();
+  final Settings settings = context.read<Settings>();
+  final format = settings.downloadFileNameFormat.value;
+
   await controller.enqueueAll(
     items.map(
       (post) => TaskRequest(
@@ -20,7 +23,7 @@ Future<void> postDownloadingNotification(
         metadata: TaskMetadata(
           previewUrl: post.preview,
           fileUrl: post.file,
-          fileName: _downloadFileName(post),
+          fileName: DownloadFileNameGenerator.generate(post, format: format),
         ),
       ),
     ),
@@ -52,13 +55,4 @@ Future<void> postFavoritingNotification(
       ),
     ),
   );
-}
-
-String _downloadFileName(Post post) {
-  String filename = '';
-  final List<String> artists = filterArtists(post.tags['artist'] ?? const []);
-  if (artists.isNotEmpty) {
-    filename = '${artists.join(', ')} - ';
-  }
-  return filename += '${post.id}.${post.ext}';
 }

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:e1547/account/account.dart';
 import 'package:e1547/app/app.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
@@ -40,6 +41,7 @@ class _AccountFormState extends State<AccountForm> {
 
   late bool? withAuth = isEditing ? widget.identity!.username != null : null;
   String? error;
+  Map<String, String>? _capturedHeaders;
 
   bool get isEditing => widget.identity != null;
   BooruEngine get currentEngine => BooruEngine.fromHost(hostController.text);
@@ -69,7 +71,8 @@ class _AccountFormState extends State<AccountForm> {
           return (usernameController.text.trim().isNotEmpty &&
                   apikeyController.text.trim().isNotEmpty) ||
               Rule34Credentials.parse(apikeyController.text) != null ||
-              Rule34Credentials.parse(usernameController.text) != null;
+              Rule34Credentials.parse(usernameController.text) != null ||
+              (_capturedHeaders != null && _capturedHeaders!.isNotEmpty);
         }
         return usernameController.text.trim().isNotEmpty &&
             apikeyController.text.trim().isNotEmpty;
@@ -132,6 +135,7 @@ class _AccountFormState extends State<AccountForm> {
         host: hostController.text,
         username: username,
         apikey: apikey,
+        extraHeaders: _capturedHeaders,
         activate: !isEditing,
         onError: (value) => setState(() {
           value ??= 'Check your network connection and login details';
@@ -159,6 +163,57 @@ class _AccountFormState extends State<AccountForm> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (engine == BooruEngine.rule34) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: FilledButton.tonalIcon(
+                  icon: const Icon(Icons.login),
+                  label: const Text('Web Login (Required for Favorites)'),
+                  onPressed: () async {
+                    final targetHost = hostController.text.trim().isNotEmpty
+                        ? hostController.text.trim()
+                        : 'https://rule34.xxx';
+                    final bool? captured = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(
+                        builder: (context) => CookieCapturePage(
+                          title: const Text('Rule34 Web Login'),
+                          initialUrl: 'https://rule34.xxx/index.php?page=account&s=home',
+                          targetHost: targetHost,
+                          engine: BooruEngine.rule34,
+                          onCookiesCaptured: (headers, cookies) {
+                            _capturedHeaders = Map.of(headers);
+                            final uid = headers['user_id'];
+                            if (uid != null && uid.isNotEmpty) {
+                              usernameController.text = uid;
+                            }
+                            final apiKey = headers['api_key'];
+                            if (apiKey != null && apiKey.isNotEmpty) {
+                              apikeyController.text = apiKey;
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                    if (context.mounted) {
+                      final idClient = context.read<IdentityClient>();
+                      final uid = _capturedHeaders?['user_id'] ?? idClient.identity.headers?['user_id'];
+                      if (uid != null && uid.isNotEmpty && usernameController.text.isEmpty) {
+                        usernameController.text = uid;
+                      }
+                      final apiKey = _capturedHeaders?['api_key'] ?? idClient.identity.headers?['api_key'];
+                      if (apiKey != null && apiKey.isNotEmpty && apikeyController.text.isEmpty) {
+                        apikeyController.text = apiKey;
+                      }
+                      setState(() {});
+                      if (captured == true) {
+                        widget.onSubmitted?.call();
+                        Navigator.of(context).maybePop(true);
+                      }
+                    }
+                  },
+                ),
+              ),
+            ],
             if (apiKeysUrl != null)
               Align(
                 alignment: Alignment.centerLeft,
@@ -243,6 +298,10 @@ class _AccountFormState extends State<AccountForm> {
                       ApikeyFormField(
                         controller: apikeyController,
                         canOmit: isEditing,
+                        optional: (engine == BooruEngine.rule34 &&
+                                _capturedHeaders != null &&
+                                _capturedHeaders!.isNotEmpty) ||
+                            isEditing,
                         host: hostController.text,
                         labelText: apikeyLabel,
                         hintText: apikeyHint,

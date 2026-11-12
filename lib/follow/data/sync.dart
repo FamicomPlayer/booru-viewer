@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:async/async.dart';
 import 'package:collection/collection.dart';
+import 'package:e1547/client/client.dart';
 import 'package:e1547/follow/follow.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/logs/logs.dart';
@@ -31,7 +32,7 @@ class FollowSync {
     'host': identity.host,
   });
 
-  final int refreshAmount = 5;
+  final int refreshAmount = 16;
   final Duration refreshRate = const Duration(hours: 1);
 
   final FollowRepository repository;
@@ -173,9 +174,35 @@ class FollowSync {
   }
 
   Future<List<Follow>> _refreshSingles(List<Follow> singles) async {
-    List<Follow> follows = singles.take(40).toList();
+    final engine = BooruEngine.fromHost(identity.host);
+    final int maxChunk = switch (engine) {
+      BooruEngine.derpibooru => 30,
+      BooruEngine.rule34 => 15,
+      BooruEngine.e621 => 40,
+    };
+    List<Follow> follows = singles.take(maxChunk).toList();
     List<String> tags = follows.map((e) => e.tags).toList();
     _assertNoDuplicates(tags);
+
+    if (engine == BooruEngine.rule34) {
+      List<Follow> result = [];
+      for (final follow in follows) {
+        if (cancelled) break;
+        try {
+          List<Post> posts = await rateLimit(
+            postsClient.page(
+              query: {'tags': follow.tags},
+              limit: refreshAmount,
+            ),
+          );
+          posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
+          result.add(follow.withUnseen(posts));
+        } catch (e) {
+          result.add(follow.withTimestamp());
+        }
+      }
+      return result;
+    }
 
     int limit = follows.length * refreshAmount;
     List<Post> allPosts = await rateLimit(
@@ -209,7 +236,7 @@ class FollowSync {
       return leftovers.isNotEmpty;
     }
 
-    if (hasLeftovers() && tagsClient != null) {
+    if (hasLeftovers() && tagsClient != null && engine == BooruEngine.e621) {
       for (final update in Map.from(updates).entries) {
         Follow follow = update.key;
         List<Post> posts = update.value;
@@ -237,12 +264,17 @@ class FollowSync {
       if ([limitReached, latestReached, depleted].any((e) => e)) {
         posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
         result.add(follow.withUnseen(posts));
+      } else {
+        // If we didn't reach the limit but there's a mismatch (like tag aliasing),
+        // we must still update the timestamp to prevent an infinite loop.
+        result.add(follow.withTimestamp());
       }
     }
     return result;
   }
 
   Future<Follow> _refreshMultiples(List<Follow> multiples) async {
+    final engine = BooruEngine.fromHost(identity.host);
     Follow follow = multiples.first;
     _assertNoDuplicates([follow.tags]);
 
@@ -251,7 +283,7 @@ class FollowSync {
     );
     posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
     follow = follow.withUnseen(posts);
-    if (poolsClient != null) {
+    if (poolsClient != null && engine == BooruEngine.e621) {
       RegExpMatch? match = poolRegex().firstMatch(follow.tags);
       if (follow.title == null && match != null) {
         try {

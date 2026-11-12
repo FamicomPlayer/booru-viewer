@@ -113,7 +113,7 @@ class FollowTile extends StatelessWidget {
     String getStatusText() {
       int unseen = follow.unseen ?? 0;
       String text = unseen.toString();
-      if (unseen >= 5) {
+      if (unseen >= 16) {
         text += '+';
       }
       text += ' new post';

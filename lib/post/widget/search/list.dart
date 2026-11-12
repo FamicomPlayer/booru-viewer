@@ -72,10 +72,12 @@ class PostGridSliver extends StatelessWidget {
       itemBuilder: itemBuilder,
     );
 
-    Widget itemBuilder(context, item, index) => ImageCacheSizeProvider(
-      size: TileLayout.of(context).tileSize * 2,
-      child: PostTile(post: item),
-    );
+    Widget itemBuilder(context, item, index) {
+      return ImageCacheSizeProvider(
+        size: TileLayout.of(context).tileSize * 2,
+        child: PostTile(post: item),
+      );
+    }
 
     return switch (TileLayout.of(context).stagger) {
       GridQuilt.square => PagedSliverGrid<int, Post>(

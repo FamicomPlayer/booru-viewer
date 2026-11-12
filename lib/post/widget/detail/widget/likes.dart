@@ -1,4 +1,9 @@
+import 'dart:io';
+import 'dart:math';
+
+import 'package:e1547/account/account.dart';
 import 'package:e1547/client/client.dart';
+import 'package:e1547/identity/identity.dart';
 import 'package:e1547/post/post.dart';
 import 'package:e1547/query/query.dart';
 import 'package:e1547/settings/settings.dart';
@@ -21,66 +26,79 @@ class LikeDisplay extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            MutationBuilder(
-              mutation: client.posts.useVote(id: post.id),
-              builder: (context, state, mutate) {
-                final bool enabled = client.hasLogin && !state.isLoading;
-                return VoteDisplay(
-                  vote: post.vote,
-                  score: post.score,
-                  onUpvote: enabled
-                      ? (isLiked) async {
-                          mutate((upvote: true, replace: !isLiked)).catchError((
-                            error,
-                          ) {
-                            messenger.showSnackBar(
-                              SnackBar(
-                                duration: const Duration(seconds: 1),
-                                content: Text(
-                                  'Failed to upvote Post #${post.id}',
-                                ),
-                              ),
-                            );
-                            return error;
-                          });
-                          return !isLiked;
-                        }
-                      : null,
-                  onDownvote: enabled
-                      ? (isLiked) async {
-                          mutate((upvote: false, replace: !isLiked)).catchError(
-                            (error) {
+            if (client.engine == BooruEngine.rule34)
+              Row(
+                children: [
+                  FavoriteButton(post: post),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Score: ${post.score}',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ],
+              )
+            else
+              MutationBuilder(
+                mutation: client.posts.useVote(id: post.id),
+                builder: (context, state, mutate) {
+                  final bool enabled = client.hasLogin && !state.isLoading;
+                  return VoteDisplay(
+                    vote: post.vote,
+                    score: post.score,
+                    onUpvote: enabled
+                        ? (isLiked) async {
+                            mutate((upvote: true, replace: !isLiked)).catchError((
+                              error,
+                            ) {
                               messenger.showSnackBar(
                                 SnackBar(
                                   duration: const Duration(seconds: 1),
                                   content: Text(
-                                    'Failed to downvote Post #${post.id}',
+                                    'Failed to upvote Post #${post.id}',
                                   ),
                                 ),
                               );
                               return error;
-                            },
-                          );
-                          return !isLiked;
-                        }
-                      : null,
-                );
-              },
-            ),
-            Row(
-              children: [
-                Text(post.favCount.toString()),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Icon(
-                    Icons.favorite,
-                    color: post.isFavorited
-                        ? Colors.pinkAccent
-                        : IconTheme.of(context).color,
+                            });
+                            return !isLiked;
+                          }
+                        : null,
+                    onDownvote: enabled
+                        ? (isLiked) async {
+                            mutate((upvote: false, replace: !isLiked)).catchError(
+                              (error) {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    duration: const Duration(seconds: 1),
+                                    content: Text(
+                                      'Failed to downvote Post #${post.id}',
+                                    ),
+                                  ),
+                                );
+                                return error;
+                              },
+                            );
+                            return !isLiked;
+                          }
+                        : null,
+                  );
+                },
+              ),
+            if (client.engine != BooruEngine.rule34)
+              Row(
+                children: [
+                  Text(post.favCount.toString()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Icon(
+                      Icons.favorite,
+                      color: post.isFavorited
+                          ? Colors.pinkAccent
+                          : IconTheme.of(context).color,
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
         const Divider(),
@@ -89,64 +107,159 @@ class LikeDisplay extends StatelessWidget {
   }
 }
 
-class FavoriteButton extends StatelessWidget {
+class FavoriteButton extends StatefulWidget {
   const FavoriteButton({super.key, required this.post});
 
   final Post post;
+
+  @override
+  State<FavoriteButton> createState() => _FavoriteButtonState();
+}
+
+class _FavoriteButtonState extends State<FavoriteButton> {
+  bool _loading = false;
 
   @override
   Widget build(BuildContext context) {
     final client = context.watch<Client>();
     final settings = context.read<Settings>();
     final messenger = ScaffoldMessenger.of(context);
+    final post = widget.post;
+    final isFavorited = post.isFavorited;
 
-    final addMutation = client.posts.useAddFavorite();
-    final removeMutation = client.posts.useRemoveFavorite();
-    return MutationBuilder(
-      mutation: post.isFavorited ? removeMutation : addMutation,
-      builder: (context, state, mutate) {
-        return InkResponse(
-          onTap: state.isLoading ? null : () {},
-          child: LikeButton(
-            isLiked: post.isFavorited,
-            circleColor: const CircleColor(start: Colors.pink, end: Colors.red),
-            bubblesColor: const BubblesColor(
-              dotPrimaryColor: Colors.pink,
-              dotSecondaryColor: Colors.red,
-            ),
-            likeBuilder: (isLiked) => Icon(
-              Icons.favorite,
-              color: isLiked ? Colors.pinkAccent : IconTheme.of(context).color,
-            ),
-            onTap: (isLiked) async {
-              try {
-                await mutate(post.id);
-                if (!isLiked && settings.upvoteFavs.value) {
-                  try {
-                    await client.posts.useVote(id: post.id).mutate((
-                      upvote: true,
-                      replace: true,
-                    ));
-                  } on Exception {
-                    // upvote is best-effort once the favorite succeeded
-                  }
-                }
-              } on Exception {
-                messenger.showSnackBar(
-                  SnackBar(
-                    duration: const Duration(seconds: 1),
-                    content: Text(
-                      isLiked
-                          ? 'Failed to remove Post #${post.id} from favorites'
-                          : 'Failed to add Post #${post.id} to favorites',
+    return LikeButton(
+      key: ValueKey('fav_${post.id}_$isFavorited'),
+      isLiked: isFavorited,
+      circleColor: const CircleColor(start: Colors.pink, end: Colors.red),
+      bubblesColor: const BubblesColor(
+        dotPrimaryColor: Colors.pink,
+        dotSecondaryColor: Colors.red,
+      ),
+      likeBuilder: (isLiked) => Icon(
+        Icons.favorite,
+        color: isLiked ? Colors.pinkAccent : IconTheme.of(context).color,
+      ),
+      onTap: (isLiked) async {
+        if (_loading) return isLiked;
+
+        if (client.engine == BooruEngine.rule34) {
+          final currentIdentity = context.mounted ? context.read<IdentityClient>().identity : client.identity;
+          final rawCookie = currentIdentity.headers?[HttpHeaders.cookieHeader] ??
+              currentIdentity.headers?['Cookie'] ??
+              currentIdentity.headers?['cookie'];
+          final hasPassHash = currentIdentity.headers?['pass_hash'] != null ||
+              (rawCookie?.toLowerCase().contains('pass_hash=') ?? false);
+          if (!hasPassHash && !isLiked) {
+            if (context.mounted) {
+              final proceed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Rule34 Web Login'),
+                  content: const Text(
+                    'Favoriting on Rule34 server requires logging into your account once via the web login page so the site grants write access to your favorites.\n\nWould you like to log in now, or save locally?',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Save Locally'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Log In'),
+                    ),
+                  ],
+                ),
+              );
+              if (proceed == true && context.mounted) {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const CookieCapturePage(
+                      title: Text('Rule34 Web Login'),
+                      initialUrl: 'https://rule34.xxx/index.php?page=account&s=login',
+                      targetHost: 'https://rule34.xxx',
+                      engine: BooruEngine.rule34,
                     ),
                   ),
                 );
               }
-              return !isLiked;
-            },
-          ),
-        );
+            }
+            final refreshedIdentity = context.mounted ? context.read<IdentityClient>().identity : client.identity;
+            final refreshedCookie = refreshedIdentity.headers?[HttpHeaders.cookieHeader] ??
+                refreshedIdentity.headers?['Cookie'] ??
+                refreshedIdentity.headers?['cookie'];
+            final nowHasPassHash = refreshedIdentity.headers?['pass_hash'] != null ||
+                (refreshedCookie?.toLowerCase().contains('pass_hash=') ?? false);
+            if (!nowHasPassHash) {
+              final newFav = true;
+              Rule34Post.markFavorited(post.id, newFav, post: post, host: client.host);
+              final updatedPost = post.copyWith(
+                isFavorited: newFav,
+                favCount: post.favCount + 1,
+              );
+              client.posts.postCache.set(updatedPost);
+              messenger.showSnackBar(
+                const SnackBar(
+                  content: Text('Saved to Local Favorites! (Log in to sync with Rule34)'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+              return newFav;
+            }
+          }
+        }
+
+        final activeClient = context.mounted ? context.read<Client>() : client;
+        setState(() => _loading = true);
+        try {
+          if (isLiked) {
+            await activeClient.posts.removeFavorite(post.id);
+          } else {
+            await activeClient.posts.addFavorite(post.id);
+          }
+
+          final newFav = !isLiked;
+          Rule34Post.markFavorited(post.id, newFav, post: post, host: activeClient.host);
+          final updatedPost = post.copyWith(
+            isFavorited: newFav,
+            favCount: newFav ? post.favCount + 1 : max(0, post.favCount - 1),
+          );
+          activeClient.posts.postCache.set(updatedPost);
+
+          if (newFav && settings.upvoteFavs.value) {
+            try {
+              await activeClient.posts.useVote(id: post.id).mutate((
+                upvote: true,
+                replace: true,
+              ));
+            } catch (_) {}
+          }
+          return newFav;
+        } catch (e) {
+          // If server call fails, fallback to local favorite so user doesn't lose it
+          if (!isLiked) {
+            Rule34Post.markFavorited(post.id, true, post: post, host: client.host);
+            final updatedPost = post.copyWith(isFavorited: true);
+            client.posts.postCache.set(updatedPost);
+            messenger.showSnackBar(
+              const SnackBar(
+                duration: Duration(seconds: 3),
+                content: Text('Server favorite failed. Saved to Local Favorites!'),
+              ),
+            );
+            return true;
+          }
+          messenger.showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 3),
+              content: Text(
+                'Failed to ${isLiked ? 'unfavorite' : 'favorite'} Post #${post.id}: $e',
+              ),
+            ),
+          );
+          return isLiked;
+        } finally {
+          if (mounted) setState(() => _loading = false);
+        }
       },
     );
   }

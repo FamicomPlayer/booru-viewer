@@ -1,4 +1,6 @@
+import 'package:e1547/client/client.dart';
 import 'package:e1547/post/post.dart';
+import 'package:e1547/shared/shared.dart';
 import 'package:e1547/tag/tag.dart';
 import 'package:e1547/user/user.dart';
 import 'package:flutter/material.dart';
@@ -78,7 +80,25 @@ class ArtistName extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    List<String> artists = filterArtists(post.tags['artist'] ?? []);
+    final client = context.watch<Client>();
+    final currentPost = client.posts.postCache.get(post.id) ?? post;
+    List<String> artists = filterArtists(currentPost.tags['artist'] ?? []);
+    if (artists.isEmpty && client.engine == BooruEngine.rule34) {
+      final generalTags = currentPost.tags['general'] ?? const [];
+      final cachedArtists = generalTags.where((t) => Rule34Post.getCachedTagCategory(t) == 1).toList();
+      if (cachedArtists.isNotEmpty) {
+        artists = filterArtists(cachedArtists);
+      } else if (currentPost.sources.isNotEmpty) {
+        final src = currentPost.sources.join(' ').toLowerCase();
+        for (final t in currentPost.tags.values.expand((e) => e)) {
+          final norm = t.toLowerCase().replaceAll(' ', '_');
+          if (norm.length > 2 && (src.contains('/$norm') || src.contains('=$norm') || (src.contains('status/') && src.contains(norm)))) {
+            artists = [t];
+            break;
+          }
+        }
+      }
+    }
     if (artists.isNotEmpty) {
       return OverflowBar(
         children: [

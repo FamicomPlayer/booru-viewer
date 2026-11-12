@@ -57,48 +57,48 @@ abstract final class FileDownloader {
           directory = null;
         }
 
-        String target;
+        String baseTarget;
         if (directory == null ||
             !await SafUtil().hasPersistedPermission(
               directory,
               checkWrite: true,
             )) {
-          target = await _throwOnNull(
+          baseTarget = await _throwOnNull(
             pickDirectory(initial: directory),
             'No directory was selected.',
           );
+          onDirectoryChanged?.call(baseTarget);
         } else {
-          target = directory;
+          baseTarget = directory;
         }
 
+        String saveTarget = baseTarget;
         final segments = folderName
                 ?.split(RegExp(r'[\\/]'))
                 .where((s) => s.trim().isNotEmpty)
                 .toList() ??
             const [];
-        final String lastSegment = Uri.parse(target).pathSegments.last;
-        if (segments.isNotEmpty && lastSegment == 'Pictures') {
+        if (segments.isNotEmpty) {
           try {
-            final targetDir = await SafUtil().mkdirp(target, segments);
-            target = targetDir.uri;
+            final targetDir = await SafUtil().mkdirp(baseTarget, segments);
+            saveTarget = targetDir.uri;
           } on Exception {
-            // can't create app specific sub-folder.
+            // can't create app specific sub-folder, fall back to baseTarget
           }
         }
 
-        onDirectoryChanged?.call(target);
         final safStream = SafStream();
         final mimeType =
             lookupMimeType(fileName ?? basename(file.path)) ??
             'application/octet-stream';
         await safStream.pasteLocalFile(
           file.path,
-          target,
+          saveTarget,
           fileName ?? basename(file.path),
           mimeType,
           overwrite: true,
         );
-        await MediaScanner.loadMedia(path: target);
+        await MediaScanner.loadMedia(path: saveTarget);
       } else {
         String directoryPath =
             directory ??
@@ -111,7 +111,7 @@ abstract final class FileDownloader {
                 .where((s) => s.trim().isNotEmpty)
                 .toList() ??
             const [];
-        if (segments.isNotEmpty && basename(directoryPath) == 'Pictures') {
+        if (segments.isNotEmpty) {
           directoryPath = joinAll([directoryPath, ...segments]);
         }
 

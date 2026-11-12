@@ -144,3 +144,11 @@ app.*.symbols
 # local credentials
 .env
 .env.*
+
+# Built binaries & helper scripts
+*.apk
+install_apk.bat
+
+# Agent data & scratch
+.agents/
+.gemini/

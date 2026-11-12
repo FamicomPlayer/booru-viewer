@@ -73,6 +73,16 @@ class _PostDetailGalleryState extends State<PostDetailGallery>
           );
         }
 
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Rule34Post.preloadSurroundingTags(
+            context,
+            index,
+            items ?? [],
+            reach: 3,
+          );
+        });
+
         return SubDefault<PageController>(
           value: widget.pageController,
           create: () => PageController(initialPage: index),
@@ -113,6 +123,12 @@ class _PostDetailGalleryState extends State<PostDetailGallery>
                   index: index,
                   posts: items ?? [],
                   size: PostImageSize.sample,
+                );
+                Rule34Post.preloadSurroundingTags(
+                  context,
+                  index,
+                  items ?? [],
+                  reach: 3,
                 );
               },
             ),

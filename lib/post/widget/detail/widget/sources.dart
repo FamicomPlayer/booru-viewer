@@ -95,6 +95,8 @@ class SourceCard extends StatelessWidget {
                     padding: const EdgeInsets.all(6),
                     child: Text(
                       linkToDisplay(url),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: enabled
                           ? TextStyle(color: Colors.blue[400])
                           : const TextStyle(
@@ -111,16 +113,13 @@ class SourceCard extends StatelessWidget {
       );
     } else {
       return Card(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Text(url),
-              ),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Text(
+            url,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       );
     }

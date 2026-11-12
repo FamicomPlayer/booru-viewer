@@ -18,8 +18,6 @@ class ClientConfig {
 
 const String _e621Host = 'https://e621.net';
 const String _e926Host = 'https://e926.net';
-const String _derpibooruHost = 'https://derpibooru.org';
-const String _rule34Host = 'https://api.rule34.xxx';
 
 class ClientFactory {
   Client create(ClientConfig config) => Client(
