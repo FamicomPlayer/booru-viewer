@@ -170,6 +170,8 @@ class _FavoriteButtonState extends State<FavoriteButton> {
                   ],
                 ),
               );
+              // Dismissing the dialog is neither of its two answers.
+              if (proceed == null) return isLiked;
               if (proceed == true && context.mounted) {
                 await Navigator.of(context).push(
                   MaterialPageRoute(
@@ -209,6 +211,7 @@ class _FavoriteButtonState extends State<FavoriteButton> {
         }
 
         final activeClient = context.mounted ? context.read<Client>() : client;
+        if (!mounted) return isLiked;
         setState(() => _loading = true);
         try {
           if (isLiked) {
