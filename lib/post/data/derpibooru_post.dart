@@ -2,7 +2,9 @@ import 'package:deep_pick/deep_pick.dart';
 import 'package:e1547/post/post.dart';
 
 abstract final class DerpibooruPost {
-  static Post fromJson(dynamic json) => pick(json).letOrThrow(
+  /// [interactions] is the list of the same name from the response that
+  /// held [json], it tells which images the user favorited or voted on.
+  static Post fromJson(dynamic json, {List<dynamic>? interactions}) => pick(json).letOrThrow(
     (post) {
       final id = post('id').asIntOrThrow();
       final width = post('width').asIntOrThrow();
@@ -13,10 +15,20 @@ abstract final class DerpibooruPost {
       final representations = post('representations').asMapOrEmpty<String, dynamic>();
       final fileUrl = representations['full']?.toString() ??
           post('view_url').asStringOrNull();
-      final sampleUrl = representations['large']?.toString() ??
+      // Every representation of a video is a video, only its thumbnails are
+      // also served as a gif.
+      final String? still = (ext == 'webm' || ext == 'mp4')
+          ? representations['thumb']?.toString().replaceFirst(
+              RegExp(r'\.(webm|mp4)$'),
+              '.gif',
+            )
+          : null;
+      final sampleUrl = still ??
+          representations['large']?.toString() ??
           representations['medium']?.toString() ??
           fileUrl;
-      final previewUrl = representations['thumb']?.toString() ??
+      final previewUrl = still ??
+          representations['thumb']?.toString() ??
           representations['small']?.toString() ??
           sampleUrl;
 
@@ -39,20 +51,24 @@ abstract final class DerpibooruPost {
       };
 
       Rating rating = Rating.s;
-      for (final tag in rawTags) {
-        final lower = tag.toLowerCase();
+      for (final raw in rawTags) {
+        final lower = raw.toLowerCase();
         if (lower == 'explicit') {
           rating = Rating.e;
         } else if (lower == 'questionable' || lower == 'suggestive') {
           if (rating != Rating.e) rating = Rating.q;
         }
 
+        // A tag keeps its whole name, namespace included, with its spaces
+        // written the way the app writes them. Anything less could not be
+        // searched for or followed again.
+        final tag = raw.replaceAll(' ', '_');
         if (lower.startsWith('artist:') || lower.startsWith('editor:')) {
-          tagMap['artist']!.add(tag.replaceFirst(RegExp(r'^(artist|editor):'), ''));
+          tagMap['artist']!.add(tag);
         } else if (lower.startsWith('character:') || lower.startsWith('oc:')) {
-          tagMap['character']!.add(tag.replaceFirst(RegExp(r'^(character|oc):'), ''));
+          tagMap['character']!.add(tag);
         } else if (lower.startsWith('species:')) {
-          tagMap['species']!.add(tag.replaceFirst('species:', ''));
+          tagMap['species']!.add(tag);
         } else if (lower.startsWith('meta:') || lower.startsWith('spoiler:')) {
           tagMap['meta']!.add(tag);
         } else {
@@ -60,18 +76,16 @@ abstract final class DerpibooruPost {
         }
       }
 
-      // Interactions (favorites and votes)
-      final interactions = post('interactions').asListOrEmpty((p) => p.asMapOrEmpty<String, dynamic>());
+      // The API lists these beside the images of a response, not within them.
       bool isFavorited = false;
       int? vote;
-      for (final interaction in interactions) {
-        final type = interaction['interaction_type'];
-        if (type == 'faved') {
-          isFavorited = true;
-        } else if (type == 'up') {
-          vote = 1;
-        } else if (type == 'down') {
-          vote = -1;
+      for (final interaction in interactions ?? const []) {
+        if (interaction is! Map || interaction['image_id'] != id) continue;
+        switch (interaction['interaction_type']) {
+          case 'faved':
+            isFavorited = true;
+          case 'voted':
+            vote = interaction['value'] == 'up' ? 1 : -1;
         }
       }
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
@@ -23,8 +25,8 @@ class TagClient {
       return dio
           .get(
             '/api/v1/json/search/tags',
-            queryParameters: {
-              if (nameMatches.isNotEmpty) 'q': '$nameMatches*',
+              queryParameters: {
+                if (nameMatches.isNotEmpty) 'q': _derpibooruPrefix(nameMatches),
               if (page != null) 'page': page,
               if (limit != null) 'per_page': limit,
             },
@@ -37,6 +39,8 @@ class TagClient {
     }
 
     if (engine == BooruEngine.rule34) {
+      // The autocomplete is all there is, and it has a single page.
+      if ((page ?? 1) > 1) return Future.value(const []);
       final term = query?['search[name_matches]']?.toString().replaceAll('*', '') ?? '';
       return autocomplete(search: term, limit: limit, cancelToken: cancelToken);
     }
@@ -87,7 +91,7 @@ class TagClient {
         return dio
             .get(
               '/api/v1/json/search/tags',
-              queryParameters: {'q': '$search*'},
+              queryParameters: {'q': _derpibooruPrefix(search)},
               cancelToken: cancelToken,
             )
             .then((r) {
@@ -105,7 +109,15 @@ class TagClient {
               cancelToken: cancelToken,
             )
             .then((r) {
-              final data = r.data;
+              Object? data = r.data;
+              // Served as text/html, which Dio leaves undecoded.
+              if (data is String) {
+                try {
+                  data = jsonDecode(data);
+                } on FormatException {
+                  return <Tag>[];
+                }
+              }
               if (data is! List) return <Tag>[];
               return data.map((item) {
                 final label = item['label']?.toString() ?? '';
@@ -157,7 +169,7 @@ class TagClient {
     QueryMap? query,
     CancelToken? cancelToken,
   }) {
-    if (engine != BooruEngine.e621) return Future.value(null);
+    if (engine != BooruEngine.e621) return Future.value();
     return dio
         .get(
           '/tag_aliases.json',
@@ -174,11 +186,20 @@ class TagClient {
         });
   }
 
+  /// Asks Derpibooru for tags that start with [prefix]. The app writes the
+  /// spaces of a name as underscores, while a name there may hold either.
+  static String _derpibooruPrefix(String prefix) {
+    final String spaced = prefix.replaceAll('_', ' ');
+    return spaced == prefix ? '$prefix*' : '$prefix* || $spaced*';
+  }
+
   static Tag _parseDerpiTag(dynamic t) {
     int categoryId = 0;
     final cat = t['category']?.toString().toLowerCase();
     switch (cat) {
       case 'artist':
+      // The site files artists and other makers under this name.
+      case 'origin':
         categoryId = 1;
       case 'copyright':
         categoryId = 3;
@@ -192,7 +213,8 @@ class TagClient {
     }
     return Tag(
       id: t['id'] is int ? t['id'] : int.tryParse(t['id'].toString()) ?? 0,
-      name: t['name']?.toString() ?? '',
+      // Spaces are written the way the app writes them in a search.
+      name: (t['name']?.toString() ?? '').replaceAll(' ', '_'),
       count: t['images'] is int ? t['images'] : int.tryParse(t['images']?.toString() ?? '') ?? 0,
       category: categoryId,
     );

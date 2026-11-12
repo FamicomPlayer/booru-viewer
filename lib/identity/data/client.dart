@@ -63,7 +63,7 @@ class IdentityClient extends IdentityRepository with ChangeNotifier {
         newHeaders['api_key'] = key;
         await replace(id.copyWith(headers: newHeaders));
       }
-    } catch (_) {} finally {
+    } on Object catch (_) {} finally {
       _fetchingR34Key = false;
     }
   }

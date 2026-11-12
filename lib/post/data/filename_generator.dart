@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:e1547/post/post.dart';
 import 'package:e1547/tag/tag.dart';
 
@@ -28,6 +30,28 @@ abstract final class DownloadFileNameGenerator {
     '{ext}',
   ];
 
+  /// The longest name, in bytes, that is asked of a filesystem. Android ends
+  /// names at 255, and saving may still add a suffix of its own.
+  static const int maxFileNameBytes = 200;
+
+  static int _bytes(String value) => utf8.encode(value).length;
+
+  /// The start of [value] that fits into [limit] bytes.
+  static String _fit(String value, int limit) {
+    final StringBuffer result = StringBuffer();
+    int size = 0;
+    for (final int rune in value.runes) {
+      final String char = String.fromCharCode(rune);
+      size += _bytes(char);
+      if (size > limit) break;
+      result.write(char);
+    }
+    return result.toString().replaceFirst(RegExp(r'[\s,_-]+$'), '');
+  }
+
+  // Sites that file tags under a namespace carry it in the name.
+  static final RegExp _namespace = RegExp(r'^(artist|editor|oc|character):');
+
   /// Generates a sanitized filename based on [format] and [post].
   static String generate(Post post, {String? format}) {
     String pattern = (format != null && format.trim().isNotEmpty)
@@ -56,56 +80,85 @@ abstract final class DownloadFileNameGenerator {
         }
       }
     }
-    final String artistSeparator = pattern.contains('{artist}_') ? '_' : ', ';
-    final String artistStr = artists.isNotEmpty ? artists.join(artistSeparator) : 'unknown_artist';
 
-    final List<String> characters = post.tags['character'] ?? const [];
-    final String characterStr = characters.isNotEmpty ? characters.join(', ') : '';
+    String bare(String tag) => tag.replaceFirst(_namespace, '');
+    final allTags = post.tags.values.expand((t) => t);
 
-    final List<String> copyrights = post.tags['copyright'] ?? const [];
-    final String copyrightStr = copyrights.isNotEmpty ? copyrights.join(', ') : '';
+    // What each token stands for, and what goes between its entries.
+    final Map<String, (List<String>, String)> lists = {
+      '{artist}': (
+        artists.map(bare).toList(),
+        pattern.contains('{artist}_') ? '_' : ', ',
+      ),
+      '{character}': ((post.tags['character'] ?? []).map(bare).toList(), ', '),
+      '{copyright}': ([...post.tags['copyright'] ?? []], ', '),
+      '{general}': ((post.tags['general'] ?? []).take(10).toList(), ' '),
+      '{meta}': ([...post.tags['meta'] ?? []], ' '),
+      '{tags}': (allTags.take(15).toList(), ' '),
+    };
 
-    final List<String> general = post.tags['general'] ?? const [];
-    final String generalStr = general.isNotEmpty ? general.take(10).join(' ') : '';
-
-    final List<String> meta = post.tags['meta'] ?? const [];
-    final String metaStr = meta.isNotEmpty ? meta.join(' ') : '';
-
-    final allTags = post.tags.values.expand((t) => t).toList();
-    final String allTagsStr = allTags.isNotEmpty ? allTags.take(15).join(' ') : '';
-
-    final String ratingStr = post.rating.name;
-    final String scoreStr = post.score.toString();
     final String extStr = post.ext;
 
-    String result = pattern
-        .replaceAll('{id}', idStr)
-        .replaceAll('{artist}', artistStr)
-        .replaceAll('{character}', characterStr)
-        .replaceAll('{copyright}', copyrightStr)
-        .replaceAll('{general}', generalStr)
-        .replaceAll('{meta}', metaStr)
-        .replaceAll('{tags}', allTagsStr)
-        .replaceAll('{rating}', ratingStr)
-        .replaceAll('{score}', scoreStr)
-        .replaceAll('{extension}', extStr)
-        .replaceAll('{ext}', extStr);
+    String render() {
+      String result = pattern.replaceAll('{id}', idStr);
+      for (final MapEntry(key: token, value: (entries, separator))
+          in lists.entries) {
+        String value = entries.join(separator);
+        if (token == '{artist}' && value.isEmpty) value = 'unknown_artist';
+        result = result.replaceAll(token, value);
+      }
+      result = result
+          .replaceAll('{rating}', post.rating.name)
+          .replaceAll('{score}', post.score.toString())
+          .replaceAll('{extension}', extStr)
+          .replaceAll('{ext}', extStr);
 
-    // If extension wasn't included in pattern, append it
-    if (!result.toLowerCase().endsWith('.$extStr'.toLowerCase())) {
-      result = '$result.$extStr';
+      // If extension wasn't included in pattern, append it
+      if (!result.toLowerCase().endsWith('.$extStr'.toLowerCase())) {
+        result = '$result.$extStr';
+      }
+
+      // Clean up empty parentheses, brackets, or dangling delimiters
+      result = result
+          .replaceAll(RegExp(r'\(\s*\)'), '')
+          .replaceAll(RegExp(r'\[\s*\]'), '')
+          .replaceAll(RegExp(r'\{\s*\}'), '')
+          .replaceAll(RegExp(r'\s*-\s*\.'), '.')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      return sanitize(result);
     }
 
-    // Clean up empty parentheses, brackets, or dangling delimiters
-    result = result
-        .replaceAll(RegExp(r'\(\s*\)'), '')
-        .replaceAll(RegExp(r'\[\s*\]'), '')
-        .replaceAll(RegExp(r'\{\s*\}'), '')
-        .replaceAll(RegExp(r'\s*-\s*\.'), '.')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+    String result = render();
 
-    return sanitize(result);
+    // A name too long for the filesystem gives up tags from the end of its
+    // longest list, which leaves the id and the start of every list in place.
+    while (_bytes(result) > maxFileNameBytes) {
+      List<String>? longest;
+      for (final MapEntry(key: token, value: (entries, separator))
+          in lists.entries) {
+        if (!pattern.contains(token) || entries.length < 2) continue;
+        if (longest == null ||
+            entries.join(separator).length > longest.join(separator).length) {
+          longest = entries;
+        }
+      }
+      if (longest == null) break;
+      longest.removeLast();
+      result = render();
+    }
+    if (_bytes(result) <= maxFileNameBytes) return result;
+
+    // What is still too long has a single tag or the format itself to blame,
+    // and is cut off ahead of the extension.
+    final String suffix = '.$extStr';
+    final String base = result.substring(0, result.length - suffix.length);
+    final int room = maxFileNameBytes - _bytes(suffix);
+    final String cut = _fit(base, room);
+    if (!pattern.contains('{id}') || cut.contains(idStr)) return '$cut$suffix';
+    // Posts that share the start of a name are still told apart by their id.
+    return '${_fit(base, room - _bytes(idStr) - 1)} $idStr'.trim() + suffix;
   }
 
   /// Sanitizes string to be safe across Android, Linux, and Windows filesystems.

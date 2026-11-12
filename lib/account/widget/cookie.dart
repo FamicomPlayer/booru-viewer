@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:collection/collection.dart';
 import 'package:e1547/client/client.dart';
 import 'package:e1547/identity/identity.dart';
 import 'package:e1547/logs/logs.dart';
@@ -41,6 +40,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
   bool _saving = false;
   String _effectiveHost = 'https://rule34.xxx';
   String _targetUrl = 'https://rule34.xxx/index.php?page=account&s=home';
+  BooruEngine _engine = BooruEngine.rule34;
 
   @override
   void didChangeDependencies() {
@@ -49,7 +49,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       _initialized = true;
       final fallbackClient = context.read<Client>();
       
-      final titleStr = widget.title is Text ? (widget.title as Text).data ?? '' : '';
+      final titleStr = widget.title is Text ? (widget.title! as Text).data ?? '' : '';
       final isRule34 = widget.engine == BooruEngine.rule34 ||
           (widget.targetHost?.toLowerCase().contains('rule34') ?? false) ||
           (widget.initialUrl?.toLowerCase().contains('rule34') ?? false) ||
@@ -62,6 +62,9 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
         _effectiveHost = widget.targetHost ?? fallbackClient.host;
         _targetUrl = widget.initialUrl ?? normalizeHostUrl(_effectiveHost);
       }
+      _engine = isRule34
+          ? BooruEngine.rule34
+          : BooruEngine.fromHost(_effectiveHost);
 
       logger = Logger('CookieCapture', {
         'host': _effectiveHost,
@@ -109,51 +112,105 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
     }
   }
 
-  Future<void> _autoDetectLogin() async {
-    try {
-      if (!_effectiveHost.contains('rule34')) return;
-      if (controller == null) return;
-      final currentUrl = await controller!.currentUrl() ?? '';
-      final onAccountPage = currentUrl.contains('page=account&s=home') ||
-          currentUrl.contains('page=account&s=options') ||
-          currentUrl.contains('page=favorites');
-
-      final checkRes = await controller!.runJavaScriptReturningResult('''
-        (function() {
-          var logout = document.querySelector('a[href*="s=logout"]') ||
-                       document.querySelector('a[href*="page=account&s=logout"]');
-          var fav = document.querySelector('a[href*="favorites"][href*="id="]') ||
-                    document.querySelector('a[href*="s=view&id="]');
-          var text = (document.body && document.body.innerText) ? document.body.innerText : '';
-          var isLogged = (logout !== null) ||
-                         (fav !== null) ||
-                         text.indexOf('Logout') !== -1 ||
-                         text.indexOf('Make like a tree') !== -1 ||
-                         text.indexOf('My Favorites') !== -1 ||
-                         text.indexOf('My Profile') !== -1;
-          return isLogged ? '1' : '0';
-        })()
-      ''');
-
-      final resStr = checkRes.toString().replaceAll('"', '').trim();
-      final isLoggedMarker = resStr == '1' || resStr.toLowerCase() == 'true';
-
-      if (onAccountPage || isLoggedMarker) {
-        final ok = await _saveCookies(showToast: false);
-        if (ok && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Login credentials successfully captured!'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-          Navigator.of(context).maybePop(true);
-        }
+  /// Evaluates [script] in the page and returns its result as text.
+  Future<String> _evaluate(String script) async {
+    final Object raw = await controller!.runJavaScriptReturningResult(script);
+    String result = raw.toString().trim();
+    // Android hands a string back the way JSON writes it.
+    if (result.startsWith('"') && result.endsWith('"')) {
+      try {
+        final Object? decoded = jsonDecode(result);
+        if (decoded is String) result = decoded;
+      } on FormatException {
+        result = result.substring(1, result.length - 1).replaceAll(r'\"', '"');
       }
-    } catch (_) {}
+    }
+    return result;
   }
 
-  Future<bool> _saveCookies({bool showToast = true}) async {
+  /// Asks the page of a Philomena site who it is shown to.
+  Future<PhilomenaPage> _readPhilomenaPage() async {
+    final String state = await _evaluate('''
+      (function() {
+        var store = document.querySelector('.js-datastore');
+        if (!store) return '';
+        return (store.dataset.userIsSignedIn || 'false') + '|' +
+            (store.dataset.userName || '');
+      })()
+    ''');
+    final int split = state.indexOf('|');
+    final String name = split < 0 ? '' : state.substring(split + 1);
+    return PhilomenaPage(
+      isSite: state.isNotEmpty,
+      signedIn: state.startsWith('true|'),
+      userName: name.isEmpty ? null : name,
+    );
+  }
+
+  /// Reads what a Rule34 page shows of its user. Whether anyone is logged in
+  /// is told by the cookies alone, no page says so dependably.
+  Future<({String? username, String? apiKey, Map<String, String> cookies})>
+  _readRule34Page() async {
+    final String state = await _evaluate(r'''
+      (function() {
+        var profile = document.querySelector('a[href*="page=account&s=profile"]');
+        var text = (document.body && document.body.innerText) ? document.body.innerText : '';
+        var uname = '';
+        if (profile) {
+          var m = profile.href.match(/[?&]uname=([^&]+)/);
+          if (m) uname = decodeURIComponent(m[1]);
+        }
+        var keyMatch = text.match(/api_key=([a-zA-Z0-9_\-]+)/i);
+        var apiKey = keyMatch ? keyMatch[1] : '';
+        var keyInput = document.querySelector('input[name="api_key"]');
+        if (keyInput && keyInput.value) apiKey = keyInput.value;
+        return uname + '|' + apiKey + '|' + (document.cookie || '');
+      })()
+    ''');
+    final List<String> parts = state.split('|');
+    if (parts.length < 3) {
+      return (username: null, apiKey: null, cookies: const <String, String>{});
+    }
+    final String username = parts[0].trim();
+    final String apiKey = parts[1].trim();
+    return (
+      username: username.isEmpty ? null : username,
+      apiKey: apiKey.isEmpty ? null : apiKey,
+      cookies: parseCookies(parts.sublist(2).join('|')),
+    );
+  }
+
+  /// Whether [url] belongs to the site whose login is captured here.
+  bool _isSiteUrl(String url) {
+    final String? host = Uri.tryParse(url)?.host;
+    if (host == null || host.isEmpty) return false;
+    if (_engine == BooruEngine.rule34) return host.endsWith('rule34.xxx');
+    return host == Uri.tryParse(normalizeHostUrl(_effectiveHost))?.host;
+  }
+
+  /// Saves the login as soon as a page shows that there is one.
+  Future<void> _autoDetectLogin() async {
+    try {
+      if (controller == null || _engine == BooruEngine.e621) return;
+      final ok = await _saveCookies(showToast: false, loginOnly: true);
+      if (ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Login credentials successfully captured!'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).maybePop(true);
+      }
+    } on Object catch (_) {}
+  }
+
+  /// Stores the login of the page on an identity. Without a login, and
+  /// unless [loginOnly], the clearance of a Cloudflare check is kept instead.
+  Future<bool> _saveCookies({
+    bool showToast = true,
+    bool loginOnly = false,
+  }) async {
     if (_saving) return false;
     setState(() => _saving = true);
     try {
@@ -161,292 +218,130 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
       final cookieManager = WebviewCookieManager();
       final currentUrl = await controller?.currentUrl() ?? _targetUrl;
 
-      // 1. Gather all cookies from Android native CookieManager
-      final cookieDomains = <String>{
-        currentUrl,
-        'https://rule34.xxx',
-        'https://rule34.xxx/',
-        'https://rule34.xxx/index.php',
-        'https://rule34.xxx/index.php?page=account&s=home',
-        'https://rule34.xxx/index.php?page=account&s=options',
-        'https://rule34.xxx/public/addfav.php',
-        'https://api.rule34.xxx',
-        'https://api.rule34.xxx/',
-        'http://rule34.xxx',
-        'http://rule34.xxx/',
+      // The browser holds the cookies of every site that was ever opened in
+      // it, of which only those of this one are taken.
+      final origins = <String>{
+        if (_isSiteUrl(currentUrl)) currentUrl,
         _effectiveHost,
+        if (_engine == BooruEngine.rule34) ...[
+          'https://rule34.xxx',
+          'https://rule34.xxx/',
+          'https://rule34.xxx/index.php',
+          'https://rule34.xxx/index.php?page=account&s=home',
+          'https://rule34.xxx/index.php?page=account&s=options',
+          'https://rule34.xxx/public/addfav.php',
+          'https://api.rule34.xxx',
+          'https://api.rule34.xxx/',
+          'http://rule34.xxx',
+          'http://rule34.xxx/',
+        ],
       };
 
       final Map<String, String> jar = {};
       final List<Cookie> allCookies = [];
-      String? foundPassHash;
-      String? foundUserId;
-      String? foundUsername;
-      String? pageApiKey;
-      bool isLoggedIn = false;
-
-      // Query raw cookies from native CookieManager
-      for (final domain in cookieDomains) {
+      for (final origin in origins) {
         try {
-          final rawNative = await cookieManager.getCookieString(domain);
-          if (rawNative != null && rawNative.isNotEmpty) {
-            for (final part in rawNative.split(';')) {
-              final trimmed = part.trim();
-              final eqIdx = trimmed.indexOf('=');
-              if (eqIdx > 0) {
-                final k = trimmed.substring(0, eqIdx).trim();
-                final v = trimmed.substring(eqIdx + 1).trim();
-                if (k.isNotEmpty && v.isNotEmpty) {
-                  jar[k] = v;
-                  final kLower = k.toLowerCase();
-                  if (kLower == 'user_id' && v.isNotEmpty) foundUserId ??= v;
-                  if (kLower == 'pass_hash' && v.isNotEmpty) foundPassHash ??= v;
-                }
-              }
-            }
+          for (final cookie in await cookieManager.getCookies(origin)) {
+            allCookies.add(cookie);
+            jar[cookie.name] = cookie.value;
           }
-        } catch (_) {}
-        try {
-          final cList = await cookieManager.getCookies(domain);
-          for (final c in cList) {
-            allCookies.add(c);
-            jar[c.name] = c.value;
-            final cNameLower = c.name.trim().toLowerCase();
-            if (cNameLower == 'user_id' && c.value.isNotEmpty) {
-              foundUserId ??= c.value;
-            }
-            if (cNameLower == 'pass_hash' && c.value.isNotEmpty) {
-              foundPassHash = c.value;
-            }
-          }
-        } catch (_) {}
+        } on Object catch (_) {}
       }
 
       String? userAgent;
       if (controller != null) {
         try {
-          final uaRes = await controller!.runJavaScriptReturningResult('navigator.userAgent');
-          final ua = uaRes.toString().replaceAll('"', '').trim();
-          if (ua.isNotEmpty && ua != 'null') {
-            userAgent = ua;
-          }
-        } catch (_) {}
+          final ua = (await _evaluate('navigator.userAgent')).replaceAll('"', '');
+          if (ua.isNotEmpty && ua != 'null') userAgent = ua;
+        } on Object catch (_) {}
       }
 
-      // 2. JavaScript DOM and document.cookie extractor inside the WebView
-      if (controller != null && _effectiveHost.contains('rule34')) {
-        try {
-          const jsExtractor = '''
-            (function() {
-              var fav = document.querySelector('a[href*="favorites"][href*="id="]') ||
-                        document.querySelector('a[href*="s=view&id="]');
-              var profile = document.querySelector('a[href*="page=account&s=profile"]');
-              var logout = document.querySelector('a[href*="s=logout"]') ||
-                           document.querySelector('a[href*="page=account&s=logout"]');
-              var text = (document.body && document.body.innerText) ? document.body.innerText : '';
-              
-              var uid = '';
-              if (fav) {
-                var m = fav.href.match(/[?&]id=([0-9]+)/);
-                if (m) uid = m[1];
-              }
-              if (!uid && text) {
-                var m2 = text.match(/user_id=([0-9]+)/i) || text.match(/User ID[:\\s]+([0-9]+)/i);
-                if (m2) uid = m2[1];
-              }
-              var uidInput = document.querySelector('input[name="user_id"]');
-              if (uidInput && uidInput.value) uid = uidInput.value;
-              
-              var uname = '';
-              if (profile) {
-                var mProf = profile.href.match(/[?&]uname=([^&]+)/);
-                if (mProf) uname = decodeURIComponent(mProf[1]);
-              }
-              var unameInput = document.querySelector('input[name="user"]');
-              if (unameInput && unameInput.value) uname = unameInput.value;
-              
-              var isLogged = (logout !== null) || 
-                             (fav !== null) ||
-                             text.indexOf('Logout') !== -1 || 
-                             text.indexOf('Make like a tree') !== -1 ||
-                             text.indexOf('My Favorites') !== -1 ||
-                             text.indexOf('My Profile') !== -1;
-                             
-              var keyMatch = text.match(/api_key=([a-zA-Z0-9_\\-]+)/i) || 
-                             text.match(/API Key[:\\s]+([a-zA-Z0-9_\\-]+)/i);
-              var apiKey = keyMatch ? keyMatch[1] : '';
-              var keyInput = document.querySelector('input[name="api_key"]') || document.querySelector('input[name="pass_hash"]');
-              if (keyInput && keyInput.value) apiKey = keyInput.value;
-              
-              var c = document.cookie || '';
-              
-              return uid + '|' + uname + '|' + (isLogged ? '1' : '0') + '|' + apiKey + '|' + c;
-            })()
-          ''';
+      final Map<String, String> headers = {
+        if (userAgent != null) ...{
+          HttpHeaders.userAgentHeader: userAgent,
+          'user_agent': userAgent,
+        },
+      };
 
-          final dynamic jsRaw = await controller!.runJavaScriptReturningResult(jsExtractor);
-          if (jsRaw != null) {
-            String rawStr = jsRaw.toString().trim();
-            if (rawStr.startsWith('"') && rawStr.endsWith('"')) {
-              try {
-                final decoded = jsonDecode(rawStr);
-                if (decoded is String) rawStr = decoded;
-              } catch (_) {
-                rawStr = rawStr.substring(1, rawStr.length - 1).replaceAll(r'\"', '"');
-              }
-            }
-
-            final parts = rawStr.split('|');
-            if (parts.length >= 5) {
-              final jsUid = parts[0].trim();
-              final jsUname = parts[1].trim();
-              final jsIsLogged = parts[2].trim() == '1';
-              final jsApiKey = parts[3].trim();
-              final jsCookie = parts.sublist(4).join('|').trim();
-
-              if (jsIsLogged) isLoggedIn = true;
-              if (jsUid.isNotEmpty) foundUserId ??= jsUid;
-              if (jsUname.isNotEmpty) foundUsername ??= jsUname;
-              if (jsApiKey.isNotEmpty) pageApiKey ??= jsApiKey;
-
-              for (final part in jsCookie.split(';')) {
-                final trimmed = part.trim();
-                final eqIdx = trimmed.indexOf('=');
-                if (eqIdx > 0) {
-                  final k = trimmed.substring(0, eqIdx).trim();
-                  final v = trimmed.substring(eqIdx + 1).trim();
-                  if (k.isNotEmpty && v.isNotEmpty) {
-                    jar[k] = v;
-                    if (k == 'user_id' && v.isNotEmpty) foundUserId ??= v;
-                    if (k == 'pass_hash' && v.isNotEmpty) foundPassHash ??= v;
-                  }
-                }
-              }
+      // A login is only taken for one when the site itself vouches for it:
+      // by its session cookies on Rule34, by its own page on Derpibooru.
+      String? username;
+      switch (_engine) {
+        case BooruEngine.rule34:
+          ({String? username, String? apiKey, Map<String, String> cookies})?
+          page;
+          if (controller != null && _isSiteUrl(currentUrl)) {
+            try {
+              page = await _readRule34Page();
+              jar.addAll(page.cookies);
+            } on Object catch (e) {
+              logger?.error('Error in JS extractor', null, e);
             }
           }
-        } catch (e) {
-          logger?.error('Error in JS extractor', null, e);
-        }
-      }
-
-      Map<String, String> headers = {};
-      if (userAgent != null) {
-        headers[HttpHeaders.userAgentHeader] = userAgent;
-        headers['user_agent'] = userAgent;
-      }
-
-      if (foundUserId != null) {
-        headers['user_id'] = foundUserId;
-      }
-      if (foundPassHash != null) {
-        headers['pass_hash'] = foundPassHash;
-      }
-
-      if (jar.isNotEmpty) {
-        headers[HttpHeaders.cookieHeader] = jar.entries
-            .map((entry) => '${entry.key}=${entry.value}')
-            .join('; ');
-      }
-
-      if (_effectiveHost.contains('rule34') && (pageApiKey == null || pageApiKey.isEmpty)) {
-        try {
-          final fetchedKey = await fetchRule34ApiKey(headers: headers);
-          if (fetchedKey != null && fetchedKey.isNotEmpty) {
-            pageApiKey = fetchedKey;
+          final session = rule34SessionOf(jar);
+          if (session == null) break;
+          username = page?.username ?? 'User #${session.userId}';
+          headers['user_id'] = session.userId;
+          headers['pass_hash'] = session.passHash;
+          headers[HttpHeaders.cookieHeader] = formatCookies(jar);
+          String? apiKey = page?.apiKey;
+          if (apiKey == null) {
+            try {
+              apiKey = await fetchRule34ApiKey(headers: headers);
+            } on Object catch (_) {}
           }
-        } catch (_) {}
+          if (apiKey != null && apiKey.isNotEmpty) headers['api_key'] = apiKey;
+        case BooruEngine.derpibooru:
+          if (controller == null || !_isSiteUrl(currentUrl)) break;
+          final page = await _readPhilomenaPage();
+          if (!page.signedIn) break;
+          if (!jar.keys.any(philomenaSessionCookies.contains)) break;
+          username = page.userName ?? 'Derpibooru User';
+          headers[HttpHeaders.cookieHeader] = formatCookies(jar);
+        case BooruEngine.e621:
+          break;
       }
 
-      if (pageApiKey != null && pageApiKey.isNotEmpty) {
-        headers['api_key'] = pageApiKey;
-      }
-
-      final isRule34Auth = _effectiveHost.contains('rule34') &&
-          (foundPassHash != null ||
-           isLoggedIn ||
-           (foundUserId != null && foundUserId.isNotEmpty) ||
-           currentUrl.contains('page=account&s=home') ||
-           currentUrl.contains('page=account&s=options'));
-
-      final isGenericAuth = !_effectiveHost.contains('rule34') && jar.isNotEmpty;
-
-      if (isRule34Auth || isGenericAuth) {
+      if (username != null) {
         widget.onCookiesCaptured?.call(headers, allCookies);
-
-        final newUsername = foundUsername ??
-            ((foundUserId != null && foundUserId.isNotEmpty)
-                ? 'User #$foundUserId'
-                : 'Rule34 User');
-
-        final allIdentities = await idClient.all();
-        final r34Identities = allIdentities.where((i) => i.host.contains('rule34')).toList();
-
-        // 1. Update EVERY rule34 identity with the captured auth headers
-        for (final id in r34Identities) {
-          final existingHeaders = Map<String, String>.from(id.headers ?? {});
-          existingHeaders.addAll(headers);
-          await idClient.replace(
-            id.copyWith(
-              username: (id.username != null &&
-                      id.username!.isNotEmpty &&
-                      id.username != 'Anonymous')
-                  ? id.username
-                  : newUsername,
-              headers: existingHeaders,
-            ),
-          );
-        }
-
-        // 2. Ensure the active identity is a Rule34 identity with these headers
-        if (idClient.identity.host.contains('rule34')) {
-          final existingHeaders = Map<String, String>.from(idClient.identity.headers ?? {});
-          existingHeaders.addAll(headers);
-          await idClient.replace(
-            idClient.identity.copyWith(
-              username: (idClient.identity.username != null &&
-                      idClient.identity.username!.isNotEmpty &&
-                      idClient.identity.username != 'Anonymous')
-                  ? idClient.identity.username
-                  : newUsername,
-              headers: existingHeaders,
-            ),
-          );
-        } else if (r34Identities.isNotEmpty) {
-          await idClient.activate(r34Identities.first.id);
-        } else {
-          final created = await idClient.add(
-            IdentityRequest(
-              host: 'https://rule34.xxx',
-              username: newUsername,
-              headers: headers,
-            ),
-          );
-          await idClient.activate(created.id);
-        }
-
+        await _storeLogin(idClient, username: username, headers: headers);
         if (showToast && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Logged in successfully! User: ${foundUsername ?? foundUserId ?? "active"}'),
+              content: Text('Logged in successfully! User: $username'),
               duration: const Duration(seconds: 2),
             ),
           );
         }
         return true;
-      } else {
-        if (showToast && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'No login session found yet. Please enter your username and password into the login form below and click Log In first.',
-              ),
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-        return false;
       }
-    } catch (e, stacktrace) {
+      if (loginOnly) return false;
+
+      // Without a login this page resolves Cloudflare challenges, of which
+      // only the clearance is kept, on the identity that is in use.
+      final cleared = withCloudflareCookies(idClient.identity.headers, jar);
+      if (cleared != null) {
+        // The clearance only holds for the browser that earned it.
+        if (userAgent != null) {
+          cleared[HttpHeaders.userAgentHeader] = userAgent;
+        }
+        await idClient.replace(idClient.identity.copyWith(headers: cleared));
+        return true;
+      }
+
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _engine == BooruEngine.e621
+                  ? 'Nothing to save yet. Please complete the check shown on the page first.'
+                  : 'No login session found yet. Please enter your username and password into the login form below and click Log In first.',
+            ),
+          ),
+        );
+      }
+      return false;
+    } on Object catch (e, stacktrace) {
       logger?.error('Failed to capture cookies', null, e, stacktrace);
       if (showToast && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -462,14 +357,72 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
     }
   }
 
+  /// Stores a captured login on one identity of this site and makes it the
+  /// active one. Other identities may be other accounts and are left alone.
+  Future<void> _storeLogin(
+    IdentityClient idClient, {
+    required String username,
+    required Map<String, String> headers,
+  }) async {
+    bool isSite(Identity identity) =>
+        BooruEngine.fromHost(identity.host) == _engine &&
+        (_engine == BooruEngine.rule34 ||
+            normalizeHostUrl(identity.host) ==
+                normalizeHostUrl(_effectiveHost));
+
+    final Identity? target = isSite(idClient.identity)
+        ? idClient.identity
+        : (await idClient.all()).where(isSite).firstOrNull;
+
+    if (target == null) {
+      final created = await idClient.add(
+        IdentityRequest(
+          host: _effectiveHost,
+          username: username,
+          headers: headers,
+        ),
+      );
+      await idClient.activate(created.id);
+      return;
+    }
+
+    final merged = Map<String, String>.from(target.headers ?? {});
+    // An API key belongs to its user and must not outlive a change of account.
+    if (headers['user_id'] != null &&
+        merged['user_id'] != null &&
+        merged['user_id'] != headers['user_id'] &&
+        !headers.containsKey('api_key')) {
+      merged.remove('api_key');
+    }
+    merged.addAll(headers);
+    final String? existing = target.username;
+    await idClient.replace(
+      target.copyWith(
+        username:
+            existing != null && existing.isNotEmpty && existing != 'Anonymous'
+            ? existing
+            : username,
+        headers: merged,
+      ),
+    );
+    if (target.id != idClient.identity.id) {
+      await idClient.activate(target.id);
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         leading: const CloseButton(),
-        title: widget.title ?? const Text('Rule34 Web Login'),
+        title:
+            widget.title ??
+            Text(
+              _engine == BooruEngine.rule34 ? 'Rule34 Web Login' : 'Web Login',
+            ),
         actions: [
-          if (_effectiveHost.contains('rule34')) ...[
+          if (_engine == BooruEngine.rule34) ...[
             IconButton(
               icon: const Icon(Icons.home_outlined),
               tooltip: 'Account Home',
@@ -516,7 +469,7 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    _effectiveHost.contains('rule34')
+                    _engine == BooruEngine.rule34
                         ? 'Log into your Rule34 account below, then tap Save Login.'
                         : 'Log into your account below, then tap Save Login.',
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
@@ -527,8 +480,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
                   onPressed: _saving
                       ? null
                       : () async {
-                          final ok = await _saveCookies(showToast: true);
-                          if (ok && mounted) {
+                          final ok = await _saveCookies();
+                          if (ok && context.mounted) {
                             Navigator.of(context).maybePop(true);
                           }
                         },
@@ -580,8 +533,8 @@ class _CookieCapturePageState extends State<CookieCapturePage> {
         onPressed: _saving
             ? null
             : () async {
-                final ok = await _saveCookies(showToast: true);
-                if (ok && mounted) {
+                final ok = await _saveCookies();
+                if (ok && context.mounted) {
                   Navigator.of(context).maybePop(true);
                 }
               },
@@ -602,6 +555,33 @@ Future<void> dropCloudflareCookies(IdentityClient client) async {
   await client.replace(client.identity.copyWith(headers: headers));
 }
 
+/// Adds the Cloudflare cookies among [cookies] to those of [headers], or null
+/// when there are none to add.
+Map<String, String>? withCloudflareCookies(
+  Map<String, String>? headers,
+  Map<String, String> cookies,
+) {
+  Map<String, String> jar = {};
+  for (final pair in (headers?[HttpHeaders.cookieHeader] ?? '').split('; ')) {
+    int split = pair.indexOf('=');
+    if (split <= 0) continue;
+    jar[pair.substring(0, split)] = pair.substring(split + 1);
+  }
+  bool found = false;
+  for (final MapEntry(:key, :value) in cookies.entries) {
+    if (!isCloudflareCookie(key)) continue;
+    jar[key] = value;
+    found = true;
+  }
+  if (!found) return null;
+  return {
+    ...?headers,
+    HttpHeaders.cookieHeader: jar.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; '),
+  };
+}
+
 /// Strips Cloudflare cookies from [headers], or null when nothing changes.
 Map<String, String>? withoutCloudflareCookies(Map<String, String>? headers) {
   String? existing = headers?[HttpHeaders.cookieHeader];
@@ -612,11 +592,11 @@ Map<String, String>? withoutCloudflareCookies(Map<String, String>? headers) {
       .where((pair) => !isCloudflareCookie(pair.split('=').first))
       .toList();
   if (kept.length == pairs.length) return null;
-  return Map.fromEntries(
-    headers!.entries.map(
-      (entry) => entry.key == HttpHeaders.cookieHeader
-          ? MapEntry(entry.key, kept.join('; '))
-          : entry,
-    ),
-  );
+  return {
+    for (final MapEntry(:key, :value) in headers!.entries)
+      if (key != HttpHeaders.cookieHeader)
+        key: value
+      else if (kept.isNotEmpty)
+        key: kept.join('; '),
+  };
 }

@@ -37,6 +37,10 @@ class _TagFolderRulesPageState extends State<TagFolderRulesPage> {
               decoration: const InputDecoration(
                 labelText: 'Matching Tags (comma separated)',
                 hintText: 'e.g. furry, anthro',
+                helperText:
+                    'Tags written together in one entry must all match, '
+                    'e.g. "rating:safe female, cute"',
+                helperMaxLines: 3,
                 border: OutlineInputBorder(),
               ),
             ),

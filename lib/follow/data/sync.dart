@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:async/async.dart';
 import 'package:collection/collection.dart';
@@ -31,6 +32,8 @@ class FollowSync {
     'user': identity.usernameOrAnon,
     'host': identity.host,
   });
+
+  late final BooruEngine engine = BooruEngine.fromHost(identity.host);
 
   final int refreshAmount = 16;
   final Duration refreshRate = const Duration(hours: 1);
@@ -118,6 +121,8 @@ class FollowSync {
         await repository.transaction(() async {
           List<Follow> follows = await repository.all(
             types: [FollowType.notify, FollowType.update],
+            // Without it the follows of every other site are reset as well.
+            identity: identity.id,
           );
           for (final follow in follows) {
             await repository.replace(follow.copyWith(updated: null));
@@ -146,21 +151,19 @@ class FollowSync {
         _total ??= follows.length;
         _remaining.add(_total! - follows.length);
 
-        List<Follow> singles = follows.where((e) => e.isSingle).toList();
+        // Only e621 has a search that takes several follows at once and still
+        // tells which of them a post belongs to.
+        List<Follow> singles = engine == BooruEngine.e621
+            ? follows.where((e) => e.isSingle).toList()
+            : [];
         if (singles.isNotEmpty) {
-          List<Follow> updates = await _refreshSingles(singles);
-          await repository.transaction(() async {
-            for (final update in updates) {
-              await repository.replace(update);
-            }
-          });
+          await _save(await _refreshSingles(singles));
           continue;
         }
 
-        List<Follow> multiples = follows.whereNot(singles.contains).toList();
-        if (multiples.isNotEmpty) {
-          Follow update = await _refreshMultiples(multiples);
-          await repository.replace(update);
+        List<Follow> others = follows.whereNot(singles.contains).toList();
+        if (others.isNotEmpty) {
+          await _save(await _refreshEach(others));
           continue;
         }
 
@@ -173,36 +176,18 @@ class FollowSync {
     }
   }
 
+  Future<void> _save(List<Follow> updates) => repository.transaction(() async {
+    for (final update in updates) {
+      await repository.replace(update);
+    }
+  });
+
   Future<List<Follow>> _refreshSingles(List<Follow> singles) async {
-    final engine = BooruEngine.fromHost(identity.host);
-    final int maxChunk = switch (engine) {
-      BooruEngine.derpibooru => 30,
-      BooruEngine.rule34 => 15,
-      BooruEngine.e621 => 40,
-    };
-    List<Follow> follows = singles.take(maxChunk).toList();
+    // A batch has to fit one page of the site, or the posts of some follows
+    // are cut off and the follows still count as refreshed.
+    List<Follow> follows = singles.take(min(40, 320 ~/ refreshAmount)).toList();
     List<String> tags = follows.map((e) => e.tags).toList();
     _assertNoDuplicates(tags);
-
-    if (engine == BooruEngine.rule34) {
-      List<Follow> result = [];
-      for (final follow in follows) {
-        if (cancelled) break;
-        try {
-          List<Post> posts = await rateLimit(
-            postsClient.page(
-              query: {'tags': follow.tags},
-              limit: refreshAmount,
-            ),
-          );
-          posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
-          result.add(follow.withUnseen(posts));
-        } catch (e) {
-          result.add(follow.withTimestamp());
-        }
-      }
-      return result;
-    }
 
     int limit = follows.length * refreshAmount;
     List<Post> allPosts = await rateLimit(
@@ -236,7 +221,7 @@ class FollowSync {
       return leftovers.isNotEmpty;
     }
 
-    if (hasLeftovers() && tagsClient != null && engine == BooruEngine.e621) {
+    if (hasLeftovers() && tagsClient != null) {
       for (final update in Map.from(updates).entries) {
         Follow follow = update.key;
         List<Post> posts = update.value;
@@ -273,35 +258,68 @@ class FollowSync {
     return result;
   }
 
-  Future<Follow> _refreshMultiples(List<Follow> multiples) async {
-    final engine = BooruEngine.fromHost(identity.host);
-    Follow follow = multiples.first;
-    _assertNoDuplicates([follow.tags]);
+  /// Refreshes follows with a search each: every follow of Rule34 and
+  /// Derpibooru, and on any site those that ask for several tags.
+  Future<List<Follow>> _refreshEach(List<Follow> follows) async {
+    // Written down in rounds, so that progress shows and survives a failure.
+    follows = follows.take(15).toList();
+    _assertNoDuplicates(follows.map((e) => e.tags).toList());
 
-    List<Post> posts = await rateLimit(
-      postsClient.page(query: {'tags': follow.tags}, limit: refreshAmount),
-    );
-    posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
-    follow = follow.withUnseen(posts);
-    if (poolsClient != null && engine == BooruEngine.e621) {
-      RegExpMatch? match = poolRegex().firstMatch(follow.tags);
-      if (follow.title == null && match != null) {
-        try {
-          follow = follow.withPool(
-            await poolsClient!.get(id: int.parse(match.namedGroup('id')!)),
-          );
-        } on ClientException catch (e) {
-          if (e.response?.statusCode == HttpStatus.notFound) {
-            follow = follow.copyWith(type: FollowType.bookmark);
-            logger.info('No pool for {tags}, set to bookmarked', {
-              'tags': follow.tags,
-            });
-          } else {
-            rethrow;
-          }
+    List<Follow> result = [];
+    for (Follow follow in follows) {
+      if (cancelled) break;
+      try {
+        List<Post> posts = await rateLimit(
+          postsClient.page(query: {'tags': follow.tags}, limit: refreshAmount),
+        );
+        posts.removeWhere((e) => e.isDeniedBy(traits.value.denylist));
+        follow = follow.withUnseen(posts);
+        if (engine == BooruEngine.e621) follow = await _withPool(follow);
+        result.add(follow);
+      } on Object catch (error) {
+        final int? status = error is ClientException
+            ? error.response?.statusCode
+            : null;
+        // Without an answer, or turned away as a client, every follow fails.
+        final bool everyFollowFails =
+            error is ClientException &&
+            (status == null ||
+                status == HttpStatus.unauthorized ||
+                status == HttpStatus.forbidden ||
+                status == HttpStatus.tooManyRequests);
+        if (!everyFollowFails) {
+          // One follow that keeps failing must not hold up those after it.
+          logger.warn('Follow {tags} failed to refresh', {
+            'tags': follow.tags,
+          }, error);
+          result.add(follow.withTimestamp());
+          continue;
         }
+        // A failed request must not pass for a follow without new posts.
+        // What was refreshed so far is kept, the failure returns next round.
+        if (result.isEmpty) rethrow;
+        break;
       }
     }
-    return follow;
+    return result;
+  }
+
+  /// Names a follow of a pool after it.
+  Future<Follow> _withPool(Follow follow) async {
+    RegExpMatch? match = poolRegex().firstMatch(follow.tags);
+    if (poolsClient == null || follow.title != null || match == null) {
+      return follow;
+    }
+    try {
+      return follow.withPool(
+        await poolsClient!.get(id: int.parse(match.namedGroup('id')!)),
+      );
+    } on ClientException catch (e) {
+      if (e.response?.statusCode != HttpStatus.notFound) rethrow;
+      logger.info('No pool for {tags}, set to bookmarked', {
+        'tags': follow.tags,
+      });
+      return follow.copyWith(type: FollowType.bookmark);
+    }
   }
 }

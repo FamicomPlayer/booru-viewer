@@ -306,7 +306,7 @@ class TasksController extends ChangeNotifier {
             try {
               currentPost = await Rule34Post.resolveTagCategories(currentPost, client.dio);
               client.posts.postCache.set(currentPost);
-            } catch (_) {}
+            } on Object catch (_) {}
           }
         }
 
@@ -315,22 +315,15 @@ class TasksController extends ChangeNotifier {
           format: settings.downloadFileNameFormat.value,
         );
 
-        final postTags = currentPost.tags.values
-            .expand((t) => t)
-            .map((t) => t.toLowerCase())
-            .toSet();
-
-        for (final rule in settings.tagFolderRules) {
-          if (rule.folder.isEmpty) continue;
-          final hasMatch =
-              rule.tags.any((rt) => postTags.contains(rt.toLowerCase()));
-          if (hasMatch) {
-            folderName = '${AppInfo.instance.appName}/${rule.folder}';
-            break;
-          }
+        final String? folder = TagFolderRule.folderFor(
+          currentPost,
+          settings.tagFolderRules,
+        );
+        if (folder != null) {
+          folderName = '${AppInfo.instance.appName}/$folder';
         }
       }
-    } catch (_) {}
+    } on Object catch (_) {}
 
     await for (final response in cacheManager.getFileStream(
       url,

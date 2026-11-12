@@ -144,5 +144,13 @@ extension ClientExtension on Client {
     }
     return false;
   }
-  String withHost(String path) => identity.withHost(path);
+  String withHost(String path) => engine.webUrl(identity.host, path);
+
+  /// Whether a vote on a post reaches the site. Rule34 has none for posts,
+  /// and Derpibooru takes them from a browser login alone.
+  bool get canVote => switch (engine) {
+    BooruEngine.e621 => hasLogin,
+    BooruEngine.derpibooru => identity.hasWebLogin,
+    BooruEngine.rule34 => false,
+  };
 }
