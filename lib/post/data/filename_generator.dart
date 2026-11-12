@@ -156,14 +156,17 @@ abstract final class DownloadFileNameGenerator {
     final String base = result.substring(0, result.length - suffix.length);
     final int room = maxFileNameBytes - _bytes(suffix);
     final String cut = _fit(base, room);
-    if (!pattern.contains('{id}') || cut.contains(idStr)) return '$cut$suffix';
+    // The id is still there when its digits stand on their own, and are not
+    // those of a longer number.
+    final bool hasId = RegExp('(?<![0-9])$idStr(?![0-9])').hasMatch(cut);
+    if (!pattern.contains('{id}') || hasId) return '$cut$suffix';
     // Posts that share the start of a name are still told apart by their id.
     return '${_fit(base, room - _bytes(idStr) - 1)} $idStr'.trim() + suffix;
   }
 
   /// Sanitizes string to be safe across Android, Linux, and Windows filesystems.
   static String sanitize(String input) {
-    const invalidChars = r'[\/\\:\*\?"<>\|]';
+    const invalidChars = r'[\/\\:\*\?"<>\|\x00-\x1f]';
     final cleaned = input.replaceAll(RegExp(invalidChars), '_');
     return cleaned.trim();
   }
