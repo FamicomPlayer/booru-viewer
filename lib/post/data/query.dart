@@ -35,13 +35,16 @@ extension PostQuerying on PostClient {
       if (poolId != null) return useByPool(id: poolId);
     }
 
+    // A numeric id that is not ours names the favorites of another user.
+    final String? rule34Fav = engine == BooruEngine.rule34 ? tags['fav'] : null;
     final isFav = (tags.length == 2 &&
             order == 'fav' &&
             username != null &&
             tags['fav'] == username) ||
         (engine == BooruEngine.derpibooru &&
             (normalized?['tags'] == 'my:faves' || tags['my'] == 'faves')) ||
-        (engine == BooruEngine.rule34 && tags['fav'] != null);
+        (rule34Fav != null &&
+            (int.tryParse(rule34Fav) == null || rule34Fav == rule34UserId));
 
     if (isFav) {
       return useFavorites();
