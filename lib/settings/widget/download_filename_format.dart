@@ -69,10 +69,6 @@ class _DownloadFileNameFormatPageState
     super.dispose();
   }
 
-  void _save(String value) {
-    context.read<Settings>().downloadFileNameFormat.value = value;
-  }
-
   @override
   Widget build(BuildContext context) {
     final previewName = DownloadFileNameGenerator.generate(
@@ -90,7 +86,7 @@ class _DownloadFileNameFormatPageState
             onPressed: () {
               setState(() {
                 _controller.text = DownloadFileNameGenerator.defaultFormat;
-                _save(_controller.text);
+                context.read<Settings>().downloadFileNameFormat.value = _controller.text;
               });
             },
           ),
@@ -132,7 +128,7 @@ class _DownloadFileNameFormatPageState
             ),
             onChanged: (val) {
               setState(() {});
-              _save(val);
+              context.read<Settings>().downloadFileNameFormat.value = val;
             },
           ),
           const SizedBox(height: 24),
@@ -152,7 +148,7 @@ class _DownloadFileNameFormatPageState
                 onSelected: (_) {
                   setState(() {
                     _controller.text = preset.format;
-                    _save(preset.format);
+                    context.read<Settings>().downloadFileNameFormat.value = preset.format;
                   });
                 },
               );
@@ -177,7 +173,7 @@ class _DownloadFileNameFormatPageState
                       ? text.replaceRange(selection.start, selection.end, token)
                       : '$text $token';
                   _controller.text = newText;
-                  _save(newText);
+                  context.read<Settings>().downloadFileNameFormat.value = newText;
                   setState(() {});
                 },
               );

@@ -301,7 +301,10 @@ class PostFeedTile extends StatelessWidget {
                 builder: (context, state, mutate) {
                   final client = context.watch<Client>();
                   final messenger = ScaffoldMessenger.of(context);
-                  final enabled = client.hasLogin && !state.isLoading;
+                  // Only e621 takes votes through its API.
+                  final enabled = client.engine == BooruEngine.e621 &&
+                      client.hasLogin &&
+                      !state.isLoading;
 
                   return VoteDisplay(
                     vote: post.vote,

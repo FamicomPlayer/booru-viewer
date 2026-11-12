@@ -45,4 +45,43 @@ void main() {
       );
     });
   });
+
+  group('withCloudflareCookies', () {
+    test('adds the clearance to an identity without cookies', () {
+      expect(
+        withCloudflareCookies(
+          {HttpHeaders.authorizationHeader: 'Basic secret'},
+          {'cf_clearance': 'fresh', '_danbooru_session': 'skip'},
+        ),
+        {
+          HttpHeaders.authorizationHeader: 'Basic secret',
+          HttpHeaders.cookieHeader: 'cf_clearance=fresh',
+        },
+      );
+    });
+
+    test('renews the clearance beside a kept session', () {
+      expect(
+        withCloudflareCookies(
+          {HttpHeaders.cookieHeader: 'user_id=42; cf_clearance=stale'},
+          {'cf_clearance': 'fresh', '__cfruid': 'new'},
+        ),
+        {
+          HttpHeaders.cookieHeader:
+              'user_id=42; cf_clearance=fresh; __cfruid=new',
+        },
+      );
+    });
+
+    test('returns null when the page set no clearance', () {
+      expect(withCloudflareCookies(null, {}), null);
+      expect(
+        withCloudflareCookies(
+          {HttpHeaders.cookieHeader: 'cf_clearance=stale'},
+          {'_danbooru_session': 'skip'},
+        ),
+        null,
+      );
+    });
+  });
 }
